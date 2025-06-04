@@ -3,6 +3,8 @@ import subprocess
 import kp
 import numpy as np
 import math
+import sys
+from typing import Annotated
 
 
 class Shader:
@@ -74,8 +76,131 @@ class BoundsShader:
             push_consts=[num_points, padding],
         )
         seq = mgr.sequence()
-        seq.record(kp.OpTensorSyncDevice(params))
+        seq.record(kp.OpSyncDevice(params))
         seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpTensorSyncLocal([bounds_out]))
+        seq.record(kp.OpSyncLocal([bounds_out]))
         seq.eval()
         return bounds_out.data().reshape(2, 2)
+
+
+class StencilShader:
+    def __init__(self):
+        self.shader_code = Shader("Stencil Shader", "stencil")
+        self.shader_code.compile()
+
+    def compute(
+        self,
+        mgr: kp.Manager,
+        bound_min: Annotated[np.ndarray, "float32", "2"],
+        bound_max: Annotated[np.ndarray, "float32", "2"],
+        width: int,
+        height: int,
+        points: np.array,
+    ):
+        print(bound_min, bound_max)
+        print(f"Number of points: {points.shape[0]}")
+        np.set_printoptions(threshold=sys.maxsize)
+        # print(f"Points  {points}")
+        stencil_np_array = np.zeros((height, width, 4), dtype=np.uint8)
+        stencil_out = mgr.image(stencil_np_array, width, height, 4)
+        points_in = mgr.tensor(points)
+        print(f"Tensor points in shape: {points_in.size()}")
+        push_constants = [
+            bound_min[0],
+            bound_min[1],
+            bound_max[0],
+            bound_max[1],
+            float(width),
+            float(height),
+        ]
+
+        algorithm = mgr.algorithm(
+            tensors=[
+                points_in,
+                stencil_out,
+            ],  # The stencil_tensor is the only output parameter
+            spirv=self.shader_code.spv,
+            workgroup=[points.shape[0], 1, 1],  # defaults to tensor[0].size,1,1
+            push_consts=push_constants,
+        )
+        seq = mgr.sequence()
+        seq.record(kp.OpSyncDevice([points_in, stencil_out]))
+        seq.record(kp.OpAlgoDispatch(algorithm))
+        seq.record(kp.OpSyncLocal([stencil_out]))
+        seq.eval()
+        generated_stencil = (
+            np.array(stencil_out.data()).reshape(height, width, 4).astype(np.uint8)
+        )
+        print(f"Generated stencil shape: {generated_stencil.shape}")
+        print(f"Generated stencil dtype: {generated_stencil.dtype}")
+
+        # print(f"Stencil: {generated_stencil[..., 0]}")  # Print only the first channel
+        np.savetxt("stencil_output.txt", generated_stencil[..., 0], fmt="%i")
+        # input("Press Enter to continue...")
+
+        return generated_stencil
+
+
+class FieldComputationShader:
+    def __init__(self):
+        self.shader_code = Shader("Field Computation Shader", "compute_fields")
+        self.shader_code.compile()
+        self.kernel_radius: float = 32.0
+        self.kernel_width: int = int(self.kernel_radius * 2 + 1)
+        self.TSNEKernel: np.array = np.zeros(
+            (self.kernel_width, self.kernel_width, 4), dtype=np.float32
+        )
+        self.func_support: float = 6.5
+        # self.generateRasterTSNEKernel(self.func_support)
+        self.field_texture: np.array = None
+
+    def generateRasterTSNEKernel(self, func_support: float):
+
+        for i in range(self.kernel_width):
+            for j in range(self.kernel_width):
+                x = (i - self.kernel_radius) / (self.kernel_radius * func_support)
+                y = (j - self.kernel_radius) / (self.kernel_radius * func_support)
+                tstud = 1.0 / (1.0 + x * x + y * y)
+                off = (j * self.kernel_width + i) * 4
+                self.TSNEKernel[i, j, 0] = tstud
+                self.TSNEKernel[i, j, 1] = tstud * tstud * x
+                self.TSNEKernel[i, j, 2] = tstud * tstud * y
+                self.TSNEKernel[i, j, 3] = 0
+
+    def compute(
+        self,
+        mgr: kp.Manager,
+        points: np.array,
+        bounds: np.array,
+        stencil: np.array,
+        width: int,
+        height: int,
+        position_buffer: int,
+    ):
+        # np.set_printoptions(threshold=sys.maxsize)
+        # print(f"TSNEKernel shape: {self.TSNEKernel.shape}")
+        # print(f"TSNEKernel dtype: {self.TSNEKernel.dtype}")
+        # print(f"TSNEKernel: {self.TSNEKernel}")
+        field_out = mgr.image(
+            np.zeros((height, width, 4), dtype=np.float32), width, height, 4
+        )
+        points_in = mgr.tensor(points)
+        bounds_in = mgr.tensor(bounds)
+        stencil_in = mgr.image(stencil, width, height, 4)
+        params = [points_in, bounds_in, field_out, stencil_in]
+        push_constants = [points.shape[0], width, height, self.func_support]
+        algorithm = mgr.algorithm(
+            tensors=params,  # The stencil_tensor is the only output parameter
+            spirv=self.shader_code.spv,
+            workgroup=[width, height, 1],  # Global dispatch 1 thread per pixel
+            push_consts=push_constants,
+        )
+        seq = mgr.sequence()
+        seq.record(kp.OpSyncDevice(params))
+        seq.record(kp.OpAlgoDispatch(algorithm))
+        seq.record(kp.OpSyncLocal([field_out]))
+        seq.eval()
+
+        print(f"Field shape {field_out.data().shape} ")
+        np.set_printoptions(threshold=sys.maxsize)
+        print(f"Field data {field_out.data()}")

@@ -9,6 +9,7 @@ class HDIShaderSource(dict):
         self._directory = os.path.join(os.path.dirname(__file__), "sources")
         keys = {
             "bounds": "",
+            "stencil": "",
             "compute_fields": "",
             "compute_forces": "",
             "interp_fields": "",
