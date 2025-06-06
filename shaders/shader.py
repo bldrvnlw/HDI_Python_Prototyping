@@ -188,7 +188,13 @@ class FieldComputationShader:
         bounds_in = mgr.tensor(bounds)
         stencil_in = mgr.image(stencil, width, height, 4)
         params = [points_in, bounds_in, field_out, stencil_in]
-        push_constants = [points.shape[0], width, height, self.func_support]
+        print(f"Num points: {points.shape[0]}")
+        push_constants = [
+            float(points.shape[0]),
+            float(width),
+            float(height),
+            self.func_support,
+        ]
         algorithm = mgr.algorithm(
             tensors=params,  # The stencil_tensor is the only output parameter
             spirv=self.shader_code.spv,
@@ -202,5 +208,60 @@ class FieldComputationShader:
         seq.eval()
 
         print(f"Field shape {field_out.data().shape} ")
-        np.set_printoptions(threshold=sys.maxsize)
-        print(f"Field data {field_out.data()}")
+        generated_field = (
+            np.array(field_out.data()).reshape(height, width, 4).astype(np.float32)
+        )
+        np.savetxt("field_output.txt", generated_field[..., 1], fmt="%f")
+        # print(f"Field data {field_out.data()}")
+        return generated_field
+
+
+class InterpolationShader:
+    def __init__(self):
+        self.shader_code = Shader("Interpolation Shader", "interp_fields")
+        self.shader_code.compile()
+
+    def compute(
+        self,
+        mgr: kp.Manager,
+        points: np.array,
+        bounds: np.array,
+        fields: np.array,
+        width: int,
+        height: int,
+    ):
+
+        self.interp_fields: np.array = np.zeros((points.shape[0], 4), dtype=np.float32)
+        interp_fields_out = mgr.tensor(self.interp_fields)
+        self.sum = np.zeros((1), dtype=np.float32)
+        sum_out = mgr.tensor(self.sum)
+
+        points_in = mgr.tensor(points)
+        bounds_in = mgr.tensor(bounds)
+        fields_in = mgr.tensor(np.reshape(fields, (height * width, 4)))
+
+        params = [points_in, fields_in, interp_fields_out, sum_out]
+        print(f"Width height: {width} : {height}")
+        push_constants = [
+            float(bounds[0, 0]),
+            float(bounds[0, 1]),
+            float(bounds[1, 0]),
+            float(bounds[1, 1]),
+            float(width),
+            float(height),
+            float(points.shape[0]),
+        ]
+        algorithm = mgr.algorithm(
+            tensors=params,  # The stencil_tensor is the only output parameter
+            spirv=self.shader_code.spv,
+            workgroup=[1, 1, 1],  # Global dispatch 1 thread per pixel
+            push_consts=push_constants,
+        )
+        seq = mgr.sequence()
+        seq.record(kp.OpSyncDevice(params))
+        seq.record(kp.OpAlgoDispatch(algorithm))
+        seq.record(kp.OpSyncLocal([interp_fields_out, sum_out]))
+        seq.eval()
+
+        print(f"Sum: {sum_out.data()}")
+        print(f"Interpolation {interp_fields_out.data()} ")

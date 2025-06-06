@@ -1,77 +1,116 @@
   #version 430
-  layout(std430, binding = 0) buffer Pos{ vec2 Positions[]; };
-  layout(std430, binding = 1) buffer Neigh { uint Neighbours[]; };
-  layout(std430, binding = 2) buffer Prob { float Probabilities[]; };
-  layout(std430, binding = 3) buffer Ind { int Indices[]; };
-  layout(std430, binding = 4) buffer Fiel { vec4 Fields[]; };
-  layout(std430, binding = 5) buffer Grad { vec2 Gradients[]; };
-  layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+  layout(std430, binding = 0) readonly buffer PosBuf{ vec2 Points[]; };
+  layout(std430, binding = 1) readonly buffer FieldsBuf { vec4 Fields[]; };  // packed RGBA float pixels
+  layout(std430, binding = 2) writeonly buffer ValBuf { vec4 Values[]; };
+  layout(std430, binding = 3) writeonly buffer SumBuf { float Sum[]; };
 
-  const uint group_size = 64;
-  shared vec2 sum_positive_red[group_size];
+  layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 
-  //layout(rg32f) uniform image2D point_tex;
-  uniform uint num_points;
-  uniform float exaggeration;
-  uniform float sum_Q; // Z-hat from the previous interpolation step
+  shared float reduction_array[64];
+
+  //uniform sampler2D fields;
+  //uniform uint num_points;
+
+  layout(push_constant) uniform FieldPushConstants {
+    vec2 rect_min; // min bounds of the points rectangle
+    vec2 rect_max; // max bounds of the points rectangle
+    vec2 imageSize;
+    float num_points;
+  } pc;
+
+  vec4 texel(int x, int y) {
+    x = clamp(x, 0, int(pc.imageSize.x) - 1);
+    y = clamp(y, 0, int(pc.imageSize.y) - 1);
+    return Fields[y * int(pc.imageSize.x) + x];
+}
+
+vec4 sampleLinearField(vec2 uv) {
+    // Convert normalized uv (0–1) to (0, size-1) field coords
+    float x = uv.x * int(pc.imageSize.x) - 0.5;
+    float y = uv.y * int(pc.imageSize.y) - 0.5;
+    vec2 fCoord = vec2(x, y);
+
+    int x0 = int(floor(fCoord.x));
+    int x1 = x0 + 1;
+    int y0 = int(floor(fCoord.y));
+    int y1 = y0 + 1;
+
+    float fx = fract(fCoord.x);
+    float fy = fract(fCoord.y);
+
+    vec4 c00 = texel(x0, y0);
+    vec4 c10 = texel(x1, y0);
+    vec4 c01 = texel(x0, y1);
+    vec4 c11 = texel(x1, y1);
+
+    // Bilinear interpolation
+    vec4 a = mix(c00, c10, fx);
+    vec4 b = mix(c01, c11, fx);
+    return mix(a, b, fy);
+    //return vec4(fCoord, 0, 0); // Fallback in case of invalid UVs
+    //return vec4(2.0); // Fallback in case of invalid UVs
+}
 
   void main() {
-    uint i = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    uint lid = gl_LocalInvocationIndex.x;
     uint groupSize = gl_WorkGroupSize.x;
-    uint lid = gl_LocalInvocationID.x;
 
-    float inv_num_points = 1.0 / float(num_points);
-    float inv_sum_Q = 1.0 / sum_Q;
+    vec2 range = pc.rect_max - pc.rect_min;
+    //vec2 inv_range = 1.0 / range;
 
-    if (i >= num_points)
-      return;
-
-    // Get the point coordinates
-    vec2 point_i = Positions[i];
-
-    //computing positive forces
-    vec2 sum_positive = vec2(0);
-
-    int index = Indices[i * 2 + 0];
-    int size = Indices[i * 2 + 1];
-
-    vec2 positive_force = vec2(0);
-    for (uint j = lid; j < size; j += group_size) {
-      // Get other point coordinates
-      vec2 point_j = Positions[Neighbours[index + j]];
-
-      // Calculate 2D distance between the two points
-      vec2 dist = point_i - point_j;
-
-      // Similarity measure of the two points - https://arxiv.org/pdf/1805.10817 Eq 5
-      float qij = 1 / (1 + dist.x*dist.x + dist.y*dist.y);
-
-      // Calculate the attractive force  - https://arxiv.org/pdf/1805.10817 Eq 12
-      positive_force += Probabilities[index + j] * qij * dist * inv_num_points;
-    }
-
-    // Reduce add sum_positive_red to a single value
-    if (lid >= 32) {
-      sum_positive_red[lid - 32] = positive_force;
-    }
-    barrier();
-    if (lid < 32) {
-      sum_positive_red[lid] += positive_force;
-    }
-    for (uint reduceSize = group_size/4; reduceSize > 1; reduceSize /= 2)
+    float sum_Q = 0;
+    uint num_points = uint(pc.num_points);
+    for (uint i = lid; i < num_points; i += groupSize)
     {
-      barrier();
-      if (lid < reduceSize) {
-        sum_positive_red[lid] += sum_positive_red[lid + reduceSize];
-      }
+      // Position of point in range 0 to 1
+      vec2 point = (Points[i] - pc.rect_min) / range;
+
+      // Bilinearly sample the input texture
+      //vec4 v = texture(Fields, point);
+      vec4 v = sampleLinearField(point);
+      sum_Q += max(v.x - 1, 0.0);
+      Values[i] = v;
+    }
+    Sum[0] = sum_Q;
+  
+    // Reduce add sum_Q to a single value
+    //uint reduction_size = 64;
+    if (lid >= 64) {
+      reduction_array[lid - 64] = sum_Q;
     }
     barrier();
+    memoryBarrierShared();
+    if (lid < 64) {
+      reduction_array[lid] += sum_Q;
+    }
+    barrier();
+    memoryBarrierShared();
+    if (lid < 32) {
+      reduction_array[lid] += reduction_array[lid + 32];
+    }
+    barrier();
+    memoryBarrierShared();
+    if (lid < 16) {
+      reduction_array[lid] += reduction_array[lid + 16];
+    }
+    barrier();
+    memoryBarrierShared();
+    if (lid < 8) {
+      reduction_array[lid] += reduction_array[lid + 8];
+    }
+    barrier();
+    memoryBarrierShared();
+    if (lid < 4) {
+      reduction_array[lid] += reduction_array[lid + 4];
+    }
+    barrier();
+    memoryBarrierShared();
+    if (lid < 2) {
+      reduction_array[lid] += reduction_array[lid + 2];
+    }
+    barrier();
+    memoryBarrierShared();
     if (lid < 1) {
-      sum_positive = sum_positive_red[0] + sum_positive_red[1];
-
-      // Computing repulsive forces - https://arxiv.org/pdf/1805.10817 Eq 14
-      vec2 sum_negative = Fields[i].yz * inv_sum_Q;
-
-      Gradients[i] = 4 * (exaggeration * sum_positive - sum_negative);
+      Sum[0] = reduction_array[0] + reduction_array[1];
     }
   }

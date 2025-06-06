@@ -11,20 +11,21 @@
   const uint hgSize = groupSize / 2;
   shared vec3 reduction_array[hgSize];
 
-  layout(push_constant) uniform UniParams {
-    uint num_points;
-    uvec2 size;
+  layout(push_constant) uniform FieldPushConstants {
+    float num_points;
+    vec2 imageSize;
     float support; 
-  } uparams;
+  } pc;
 
   void main() {
     uint x = gl_WorkGroupID.x;
     uint y = gl_WorkGroupID.y;
     
     // An x and y coordinate across the image. 
-    // Anything that is masked by the stencil (edges) is ignored.
-    //float mask = imageLoad(Stencil, ivec2(x, y)).x;
-    //if (mask == 0) return;
+    // Anything that is masked by the stencil 
+    // i.e. the edges regions with no points is ignored.
+    float mask = imageLoad(Stencil, ivec2(x, y)).x;
+    if (mask == 0) return;
 
     uint lid = gl_LocalInvocationIndex.x;
 
@@ -33,21 +34,19 @@
     vec2 max_bounds = Bounds[1];
     vec2 range = max_bounds - min_bounds;
 
-    // Position of the pixel in world coords
-    vec2 pixel_pos = (((vec2(x, y) + vec2(0.5)) / uparams.size) * range) + min_bounds;
-    pixel_pos = vec2(x,y);
+    // Position of the current pixel in world (domain) coords
+    vec2 pixel_pos = (((vec2(x, y) + vec2(0.5)) / pc.imageSize) * range) + min_bounds;
+
     vec4 value = vec4(0);
 
     // Stride over the point positions by the group size
     // calculating field (vector and scalar) contribution
     // at this pixel position based on the point distance.
-    for (uint i = lid; i < uparams.num_points; i += groupSize)
+    uint num_points = uint(pc.num_points);
+    for (uint i = lid; i < num_points; i += groupSize)
     {
       // Distance between pixel and kernel center in domain units
       vec2 t = pixel_pos - Positions[i];
-
-      //if (abs(t.x) > uparams.support || abs(t.y) > uparams.support)
-      //  continue;
 
       float eucl_sqrd = dot(t, t);
 
@@ -59,26 +58,29 @@
       value.xyz += vec3(tstud, tstud2*t.x, tstud2*t.y);
 
     }
-    imageStore(Fields, ivec2(x, y), vec4(pixel_pos, 0, 0));
-    /*
+    //imageStore(Fields, ivec2(x, y), vec4(value));
+    
     // Initialize the reduction array with the values from the last thread
     // then reduce the static and vector values in parallel for this pixel 
     if (lid >= hgSize) {
       reduction_array[lid - hgSize] = value.xyz;
     }
     barrier();
+    memoryBarrierShared();
     if (lid < hgSize) {
       reduction_array[lid] += value.xyz;
     }
     for (uint reduceSize = hgSize/2; reduceSize > 1; reduceSize /= 2)
     {
       barrier();
+      memoryBarrierShared();
       if (lid < reduceSize) {
         reduction_array[lid] += reduction_array[lid + reduceSize];
       }
     }
     barrier();
+    memoryBarrierShared();
     if (lid < 1) {
       imageStore(Fields, ivec2(x, y), vec4(reduction_array[0] + reduction_array[1], 0));
-    } */
+    } 
   }

@@ -1,4 +1,9 @@
-from shaders.shader import BoundsShader, StencilShader, FieldComputationShader
+from shaders.shader import (
+    BoundsShader,
+    StencilShader,
+    FieldComputationShader,
+    InterpolationShader,
+)
 import sys
 import numpy as np
 from kp import Manager
@@ -6,8 +11,9 @@ from kp import Manager
 bounds_shader = BoundsShader()
 stencil_shader = StencilShader()
 fields_shader = FieldComputationShader()
+interpolation_shader = InterpolationShader()
 # 1M digits in the range 0-128
-points = (np.random.rand(2**20, 2).astype(np.float32) * 128) - (64, 64)
+points = (np.random.rand(2**16, 2).astype(np.float32) * 128) - (64, 64)
 print(f"Points {points}")
 print(f"Points max {np.max(points)} min {np.min(points)}")
 
@@ -40,9 +46,7 @@ stencil = stencil_shader.compute(
 )
 print(f"Stencil shape {stencil.shape} dtype {stencil.dtype}")
 
-exit(0)
-
-fields_shader.compute(
+fields = fields_shader.compute(
     mgr=mgr,
     points=points,
     bounds=bounds,
@@ -51,6 +55,18 @@ fields_shader.compute(
     height=height,
     position_buffer=1,
 )
+
+print(f"Fields shape {fields.shape} dtype {fields.dtype}")
+
+interpolation_shader.compute(
+    mgr=mgr,
+    points=points,
+    bounds=bounds,
+    fields=fields,
+    width=width,
+    height=height,
+)
+
 
 mgr.destroy()
 # stencil = stencil.reshape(height, width, 4)  # colours
