@@ -11,19 +11,23 @@
   shared vec2 sum_positive_red[group_size];
 
   //layout(rg32f) uniform image2D point_tex;
-  uniform uint num_points;
-  uniform float exaggeration;
-  uniform float sum_Q; // Z-hat from the previous interpolation step
+
+  layout (push_constant) uniform StencilPushConstants {
+    uint num_points; 
+    float exaggeration;
+    float sum_Q; 
+  } pc;
+
 
   void main() {
     uint i = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
     uint groupSize = gl_WorkGroupSize.x;
     uint lid = gl_LocalInvocationID.x;
 
-    float inv_num_points = 1.0 / float(num_points);
-    float inv_sum_Q = 1.0 / sum_Q;
+    float inv_num_points = 1.0 / float(pc.num_points);
+    float inv_sum_Q = 1.0 / pc.sum_Q;
 
-    if (i >= num_points)
+    if (i >= pc.num_points)
       return;
 
     // Get the point coordinates
@@ -72,6 +76,6 @@
       // Computing repulsive forces - https://arxiv.org/pdf/1805.10817 Eq 14
       vec2 sum_negative = Fields[i].yz * inv_sum_Q;
 
-      Gradients[i] = 4 * (exaggeration * sum_positive - sum_negative);
+      Gradients[i] = 4 * (pc.exaggeration * sum_positive - sum_negative);
     }
   }

@@ -233,11 +233,10 @@ class InterpolationShader:
 
         self.interp_fields: np.array = np.zeros((points.shape[0], 4), dtype=np.float32)
         interp_fields_out = mgr.tensor(self.interp_fields)
-        self.sum = np.zeros((1), dtype=np.float32)
-        sum_out = mgr.tensor(self.sum)
+        self.sumQ = np.zeros((1), dtype=np.float32)
+        sum_out = mgr.tensor(self.sumQ)
 
         points_in = mgr.tensor(points)
-        bounds_in = mgr.tensor(bounds)
         fields_in = mgr.tensor(np.reshape(fields, (height * width, 4)))
 
         params = [points_in, fields_in, interp_fields_out, sum_out]
@@ -263,5 +262,30 @@ class InterpolationShader:
         seq.record(kp.OpSyncLocal([interp_fields_out, sum_out]))
         seq.eval()
 
-        print(f"Sum: {sum_out.data()}")
-        print(f"Interpolation {interp_fields_out.data()} ")
+        self.interp_fields = (
+            np.array(interp_fields_out.data())
+            .reshape(points.shape[0], 4)
+            .astype(np.float32)
+        )
+
+        self.sumQ = sum_out.data()
+        # return (interp_fields, )
+        print(f"Sum: {self.sumQ}")
+        print(f"Interpolation {self.interp_fields} ")
+
+
+class ForcesShader:
+    def __init__(self):
+        self.shader_code = Shader("Forces Shader", "compute_forces")
+        self.shader_code.compile()
+
+    def compute(
+        self,
+        mgr: kp.Manager,
+        points: np.array,
+        bounds: np.array,
+        fields: np.array,
+        width: int,
+        height: int,
+    ):
+        pass
