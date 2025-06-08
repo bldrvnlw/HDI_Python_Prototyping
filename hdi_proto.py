@@ -19,7 +19,7 @@ stencil_shader = StencilShader()
 fields_shader = FieldComputationShader()
 interpolation_shader = InterpolationShader()
 # 1M digits in the range 0-128
-points = (np.random.rand(2**12, 2).astype(np.float32) * 128) - (64, 64)
+points = (np.random.rand(2**16, 2).astype(np.float32) * 128) - (64, 64)
 print(f"Points {points}")
 print(f"Points max {np.max(points)} min {np.min(points)}")
 
@@ -27,13 +27,15 @@ perplexity = 30
 perplexity_multiplier = 3
 nn = perplexity * perplexity_multiplier + 1
 
-indices, distances = compute_annoy_probabilities(
+distances, neighbours, indices = compute_annoy_probabilities(
     data=points,
     num_trees=4,
     nn=nn,
 )
 
-print(f"distances {distances}")
+print(f"{distances.shape} distances {distances}")
+print(f"indices {indices}")
+print(f"{neighbours.shape} neighbours {neighbours}")
 exit(0)
 
 # D = euclidian_sqrdistance_matrix(points)

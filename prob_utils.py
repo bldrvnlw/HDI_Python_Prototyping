@@ -104,30 +104,58 @@ def compute_annoy_probabilities(
     annoy_index.build(num_trees)
 
     # Sample check if enough neighbours are available
-    for i in range(100):
-        neighbours = annoy_index.get_nns_by_item(i, nn, include_distances=False)
-        if len(neighbours) < nn:
-            print(
-                f"Warning: Not enough neighbours for point {i}. Found"
-                f" {len(neighbours)} instead of {nn}."
-            )
-            return np.zeros((num_points, nn), dtype=np.float32)
+    # for i in range(100):
+    #    neighbours = annoy_index.get_nns_by_item(i, nn, include_distances=False)
+    #    if len(neighbours) < nn:
+    #        print(
+    #            f"Warning: Not enough neighbours for point {i}. Found"
+    #            f" {len(neighbours)} instead of {nn}."
+    #        )
+    #        return np.zeros((num_points, nn), dtype=np.float32)
 
     distances = np.zeros((num_points, nn))
-    indices = np.zeros((num_points, nn)).astype(int)
+    neighbours = np.zeros((num_points * nn)).astype(np.uint32)
+    indices = np.zeros((2 * num_points)).astype(np.int32)
+    index = 0
 
     def getnns(i):
         # print(f"Processing point {i} of {num_points}")
         # Annoy returns the query point itself as the first element
-        indices_i, distances_i = annoy_index.get_nns_by_item(
+        neighbours_i, distances_i = annoy_index.get_nns_by_item(
             i, nn + 1, include_distances=True
         )
-        indices[i] = indices_i[1:]
-        distances[i] = distances_i[1:]
+        np.put(
+            neighbours, np.arange(i * nn, (i + 1) * nn), neighbours_i[1:]
+        )  # Append nearest neighbours excluding the query point
+        distances[i] = distances_i[1:]  # Append distances excluding the query point
+        np.put(indices, [2 * i, (2 * i) + 1], (i * nn, nn))
+
+    # Parallel processing to speed up the nearest neighbor search
 
     num_jobs = cpu_count()
     Parallel(n_jobs=num_jobs, require="sharedmem")(
         delayed(getnns)(i) for i in range(num_points)
     )
 
-    return indices, distances
+    return distances, neighbours, indices
+
+
+class DataMap:
+    """
+    Class to manage a mapping of data points to their indices and distances.
+    This is used to store the results of the Annoy nearest neighbor search.
+    """
+
+    def __init__(
+        self, indices: np.ndarray[np.int32], distances: np.ndarray[np.float32]
+    ):
+        self.indices = indices
+        self.distances = distances
+        # value = tuple(int, float)
+        # storage = List[value]
+
+    def __repr__(self):
+        return (
+            f"DataMap(indices.shape={self.indices.shape},"
+            f" distances.shape={self.distances.shape})"
+        )
