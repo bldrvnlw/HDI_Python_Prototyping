@@ -5,19 +5,21 @@
   layout(std430, binding = 3) buffer GainLayout { float Gain[]; };
   layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-  uniform uint num_points;
-  uniform float eta;
-  uniform float minGain;
-  uniform float iter;
-  uniform float mom_iter;
-  uniform float mom;
-  uniform float final_mom;
-  uniform float mult;
+  layout(push_constant) uniform FieldPushConstants {
+    float num_points; // Number of points in the layout
+    float eta;        // Learning rate
+    float minGain;   // Minimum gain value
+    float iter;      // Current iteration number
+    float mom_iter;  // Iteration number for momentum switch
+    float mom;       // Initial momentum value
+    float final_mom; // Final momentum value
+    float mult;      // Multiplier for position update
+  } pc;
 
   void main() {
     uint workGroupID = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
     uint i = workGroupID * gl_WorkGroupSize.x + gl_LocalInvocationID.x;
-
+  uint num_points = uint(pc.num_points);
     if (i >= num_points * 2)
       return;
 
@@ -26,14 +28,14 @@
     float gain = Gain[i];
 
     gain = sign(grad) != sign(pgrad) ? gain + 0.2 : gain * 0.8;
-    gain = max(gain, minGain);
+    gain = max(gain, pc.minGain);
 
-    float etaGain = eta * gain;
+    float etaGain = pc.eta * gain;
     grad = (grad > 0 ? 1 : -1) * abs(grad * etaGain) / etaGain;
 
-    pgrad = (iter < mom_iter ? mom : final_mom) * pgrad - etaGain * grad;
+    pgrad = (pc.iter < pc.mom_iter ? pc.mom : pc.final_mom) * pgrad - etaGain * grad;
 
     Gain[i] = gain;
     PrevGradients[i] = pgrad;
-    Positions[i] += pgrad * mult;
+    Positions[i] += pgrad * pc.mult;
   }
