@@ -14,6 +14,7 @@ class HDIShaderSource(dict):
             "compute_forces": "",
             "interp_fields": "",
             "update": "",
+            "center_scale": "",
         }
         self._loaded = set()
         super().__init__({key: None for key in keys})
