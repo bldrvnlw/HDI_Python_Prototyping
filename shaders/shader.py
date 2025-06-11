@@ -5,6 +5,7 @@ import numpy as np
 import math
 import sys
 from typing import Annotated
+from shaders.persistent_tensors import PersistentTensors, ShaderBuffers
 
 
 class Shader:
@@ -53,6 +54,7 @@ class BoundsShader:
         num_points: int,
         padding: float,
         points: np.array,
+        persistent_tensors: PersistentTensors,
     ):
         """_summary_
 
@@ -62,9 +64,10 @@ class BoundsShader:
             points (_type_): _description_
         """
         #
-        points_in = mgr.tensor(points)
+        persistent_tensors.set_tensor_data(ShaderBuffers.POSITION, points)
+        points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         # print(points_in.data(), points_in.data().shape)
-        bounds_out = mgr.tensor(np.zeros((1, 4), dtype=np.float32))
+        bounds_out = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
         # print(bounds_out.data(), bounds_out.data().shape)
 
         params = [bounds_out, points_in]
@@ -91,25 +94,24 @@ class StencilShader:
     def compute(
         self,
         mgr: kp.Manager,
-        bound_min: Annotated[np.ndarray, "float32", "2"],
-        bound_max: Annotated[np.ndarray, "float32", "2"],
         width: int,
         height: int,
-        points: np.array,
+        num_points: int,
+        persistent_tensors: PersistentTensors,
     ):
-        print(bound_min, bound_max)
-        print(f"Number of points: {points.shape[0]}")
+        bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
+        points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
+        print(f"bounds {bounds}")
         np.set_printoptions(threshold=sys.maxsize)
         # print(f"Points  {points}")
         stencil_np_array = np.zeros((height, width, 4), dtype=np.uint8)
         stencil_out = mgr.image(stencil_np_array, width, height, 4)
-        points_in = mgr.tensor(points)
         print(f"Tensor points in shape: {points_in.size()}")
         push_constants = [
-            bound_min[0],
-            bound_min[1],
-            bound_max[0],
-            bound_max[1],
+            bounds[0],
+            bounds[1],
+            bounds[2],
+            bounds[3],
             float(width),
             float(height),
         ]
@@ -120,7 +122,7 @@ class StencilShader:
                 stencil_out,
             ],  # The stencil_tensor is the only output parameter
             spirv=self.shader_code.spv,
-            workgroup=[points.shape[0], 1, 1],  # defaults to tensor[0].size,1,1
+            workgroup=[num_points, 1, 1],  # defaults to tensor[0].size,1,1
             push_consts=push_constants,
         )
         seq = mgr.sequence()
@@ -170,12 +172,11 @@ class FieldComputationShader:
     def compute(
         self,
         mgr: kp.Manager,
-        points: np.array,
-        bounds: np.array,
+        num_points: int,
         stencil: np.array,
         width: int,
         height: int,
-        position_buffer: int,
+        persistent_tensors: PersistentTensors,
     ):
         # np.set_printoptions(threshold=sys.maxsize)
         # print(f"TSNEKernel shape: {self.TSNEKernel.shape}")
@@ -184,13 +185,13 @@ class FieldComputationShader:
         field_out = mgr.image(
             np.zeros((height, width, 4), dtype=np.float32), width, height, 4
         )
-        points_in = mgr.tensor(points)
-        bounds_in = mgr.tensor(bounds)
+        points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
+        bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
         stencil_in = mgr.image(stencil, width, height, 4)
         params = [points_in, bounds_in, field_out, stencil_in]
-        print(f"Num points: {points.shape[0]}")
+        print(f"Num points: {num_points}")
         push_constants = [
-            float(points.shape[0]),
+            float(num_points),
             float(width),
             float(height),
             self.func_support,
@@ -224,31 +225,30 @@ class InterpolationShader:
     def compute(
         self,
         mgr: kp.Manager,
-        points: np.array,
-        bounds: np.array,
+        num_points: int,
         fields: np.array,
         width: int,
         height: int,
+        persistent_tensors: PersistentTensors,
     ):
 
-        self.interp_fields: np.array = np.zeros((points.shape[0], 4), dtype=np.float32)
-        interp_fields_out = mgr.tensor(self.interp_fields)
-        self.sumQ = np.zeros((1), dtype=np.float32)
-        sum_out = mgr.tensor(self.sumQ)
+        interp_fields_out = persistent_tensors.get_tensor(ShaderBuffers.INTERP_FIELDS)
+        sum_out = persistent_tensors.get_tensor(ShaderBuffers.SUM_Q)
 
-        points_in = mgr.tensor(points)
+        points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
+        bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
         fields_in = mgr.tensor(np.reshape(fields, (height * width, 4)))
 
         params = [points_in, fields_in, interp_fields_out, sum_out]
         print(f"Width height: {width} : {height}")
         push_constants = [
-            float(bounds[0, 0]),
-            float(bounds[0, 1]),
-            float(bounds[1, 0]),
-            float(bounds[1, 1]),
+            float(bounds[0]),
+            float(bounds[1]),
+            float(bounds[2]),
+            float(bounds[3]),
             float(width),
             float(height),
-            float(points.shape[0]),
+            float(num_points),
         ]
         algorithm = mgr.algorithm(
             tensors=params,  # The stencil_tensor is the only output parameter
@@ -263,9 +263,7 @@ class InterpolationShader:
         seq.eval()
 
         self.interp_fields = (
-            np.array(interp_fields_out.data())
-            .reshape(points.shape[0], 4)
-            .astype(np.float32)
+            np.array(interp_fields_out.data()).reshape(num_points, 4).astype(np.float32)
         )
 
         self.sumQ = sum_out.data()
@@ -282,10 +280,146 @@ class ForcesShader:
     def compute(
         self,
         mgr: kp.Manager,
-        points: np.array,
-        bounds: np.array,
-        fields: np.array,
-        width: int,
-        height: int,
+        num_points: int,
+        exaggeration: float,
+        persistent_tensors: PersistentTensors,
     ):
-        pass
+        points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
+        neighbours_in = persistent_tensors.get_tensor(ShaderBuffers.NEIGHBOUR)
+        prob_in = persistent_tensors.get_tensor(ShaderBuffers.PROBABILITIES)
+        index_in = persistent_tensors.get_tensor(ShaderBuffers.INDEX)
+        interp_fields_in = persistent_tensors.get_tensor(ShaderBuffers.INTERP_FIELDS)
+        gradients_out = persistent_tensors.get_tensor(ShaderBuffers.GRADIENTS)
+
+        params = [
+            points_in,
+            neighbours_in,
+            index_in,
+            prob_in,
+            interp_fields_in,
+            gradients_out,
+        ]
+        sumq_data = persistent_tensors.get_tensor_data(ShaderBuffers.SUM_Q)
+
+        push_constants = [
+            num_points,
+            exaggeration,
+            sumq_data[0],
+        ]
+
+        grid_size = int(math.sqrt(num_points) + 1)
+        print(f"Grid size: {grid_size} for num_points: {num_points}")
+        algorithm = mgr.algorithm(
+            tensors=params,  # The stencil_tensor is the only output parameter
+            spirv=self.shader_code.spv,
+            workgroup=[grid_size, grid_size, 1],  # Global dispatch 1 thread per pixel
+            push_consts=push_constants,
+        )
+        seq = mgr.sequence()
+        seq.record(kp.OpSyncDevice(params))
+        seq.record(kp.OpAlgoDispatch(algorithm))
+        seq.record(kp.OpSyncLocal([gradients_out]))
+        seq.eval()
+
+        grad = gradients_out.data()
+        # return (interp_fields, )
+        print(f"Gradient: {grad}")
+
+
+class UpdateShader:
+    def __init__(self):
+        self.shader_code = Shader("Point Update Shader", "update")
+        self.shader_code.compile()
+
+    def compute(
+        self,
+        mgr: kp.Manager,
+        num_points: int,
+        eta: float,
+        minimum_gain: float,
+        iteration: int,
+        momentum: float,
+        momentum_switch: int,
+        momentum_final: float,
+        gain_multiplier: float,
+        persistent_tensors: PersistentTensors,
+    ):
+        points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
+        gradients_in = persistent_tensors.get_tensor(ShaderBuffers.GRADIENTS)
+        prev_gradients_in = persistent_tensors.get_tensor(ShaderBuffers.PREV_GRADIENTS)
+        gain_in = persistent_tensors.get_tensor(ShaderBuffers.GAIN)
+
+        params = [points_in, gradients_in, prev_gradients_in, gain_in]
+
+        push_constants = [
+            float(num_points),
+            float(eta),
+            float(minimum_gain),
+            float(iteration),
+            float(momentum_switch),
+            float(momentum),
+            float(momentum_final),
+            float(gain_multiplier),
+        ]
+
+        algorithm = mgr.algorithm(
+            tensors=params,  # The stencil_tensor is the only output parameter
+            spirv=self.shader_code.spv,
+            workgroup=[1, 1, 1],  # Global dispatch 1 thread per pixel
+            push_consts=push_constants,
+        )
+        seq = mgr.sequence()
+        seq.record(kp.OpSyncDevice(params))
+        seq.record(kp.OpAlgoDispatch(algorithm))
+        seq.record(kp.OpSyncLocal([points_in]))
+        seq.eval()
+
+        updated_points = points_in.data()
+        print(f"Updated points: {updated_points}")
+
+
+class CenterScaleShader:
+    def __init__(self):
+        self.shader_code = Shader("Update Embedding ", "center_scale")
+        self.shader_code.compile()
+
+    def compute(
+        self,
+        mgr: kp.Manager,
+        num_points: int,
+        exaggeration: float,
+        persistent_tensors: PersistentTensors,
+    ):
+        points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
+        bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
+
+        params = [points_in, bounds_in]
+        if exaggeration > 1.2:
+            scale = 1.0
+            diameter = 0.1
+        else:
+            scale = 0.0
+            diameter = 0.0
+
+        push_constants = [
+            float(num_points),
+            float(scale),
+            float(diameter),
+        ]
+        num_workgroups = (num_points / 128) + 1
+        grid_size = int(math.sqrt(num_workgroups)) + 1
+
+        algorithm = mgr.algorithm(
+            tensors=params,  # The stencil_tensor is the only output parameter
+            spirv=self.shader_code.spv,
+            workgroup=[grid_size, grid_size, 1],  # Global dispatch 1 thread per pixel
+            push_consts=push_constants,
+        )
+        seq = mgr.sequence()
+        seq.record(kp.OpSyncDevice(params))
+        seq.record(kp.OpAlgoDispatch(algorithm))
+        seq.record(kp.OpSyncLocal([points_in]))
+        seq.eval()
+
+        updated_points = points_in.data()
+        print(f"Updated points after center and scale: {updated_points}")
