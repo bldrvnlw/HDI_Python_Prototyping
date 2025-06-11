@@ -1,6 +1,7 @@
 import numpy as np
 from annoy import AnnoyIndex
 from joblib import cpu_count, Parallel, delayed
+from typing import Tuple, List
 
 
 def euclidian_sqrdistance_matrix(
@@ -37,11 +38,27 @@ def _h_beta(D_row, beta):
 
 
 def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=50):
+    """
+    Compute the conditional probabilities for a given distance matrix D
+    using a binary search to find the correct sigma for each point.
+    The probabilities are computed such that the perplexity of the distribution
+    is equal to the specified perplexity value.
+    Args:
+        D (np.ndarray): Distance matrix of shape (N, N) where D[i, j] is the distance between points i and j.
+        perplexity (float): Desired perplexity of the distribution.
+        tol (float): Tolerance for convergence.
+        max_iter (int): Maximum number of iterations for binary search.
+    Returns:
+        P (np.ndarray): Conditional probability matrix of shape (N, nn) where P[i, j] is the conditional probability of point j given point i.
+        sigmas (np.ndarray): Array of sigmas used for each point.
+    """
+
     N = D.shape[0]
+    nn = D.shape[1]
     target_entropy = np.log(perplexity)
 
     # Initialize output
-    P = np.zeros((N, N))
+    P = np.zeros((N, nn))
     sigmas = np.ones(N)
 
     for i in range(N):
@@ -49,7 +66,9 @@ def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=50):
         beta_max = np.inf
         beta = 1.0  # beta = 1 / (2 * sigma^2)
 
-        Di = np.delete(D[i], i)  # Exclude self-distance
+        Di = D[
+            i
+        ]  # distance from this point to defined neighbours (self already excluded)
         H, thisP = _h_beta(Di, beta)
 
         # Binary search for correct beta
@@ -66,7 +85,10 @@ def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=50):
             iter_count += 1
 
         # Fill row of P (with 0 at the i-th position)
-        P[i, np.concatenate((np.r_[0:i], np.r_[i + 1 : N]))] = thisP
+        # P_row_i = np.zeros(nn, dtype=np.float32)
+        # P_row_i[:i] = thisP[:i]
+        # P_row_i[i + 1 :] = thisP[i:]
+        P[i] = thisP
         sigmas[i] = np.sqrt(1 / (2 * beta))
 
     return P, sigmas
@@ -80,9 +102,9 @@ def symmetrize_P(P_cond):
 
 def compute_annoy_probabilities(
     data: np.ndarray[np.float32],
-    num_trees: int = 4,
+    num_trees: int = 20,
     nn: int = 30,
-) -> np.ndarray[np.float32]:
+) -> Tuple[np.ndarray[np.float32], np.ndarray[np.uint32], np.ndarray[np.int32]]:
     """
     Compute the probabilities using Annoy for nearest neighbors (euclidean metric).
     Inspired by CoPilot and https://github.com/astrogilda/openTSNE
@@ -93,7 +115,10 @@ def compute_annoy_probabilities(
         nn (int): Number of nearest neighbors to consider.
 
     Returns:
-        np.ndarray: Probabilities matrix.
+        tuple
+            np.ndarray: distances
+            np.ndarray: neighbours
+            nd:array indices
     """
     num_points, dim = data.shape
     annoy_index = AnnoyIndex(dim, "euclidean")
@@ -114,30 +139,31 @@ def compute_annoy_probabilities(
     #        return np.zeros((num_points, nn), dtype=np.float32)
 
     distances = np.zeros((num_points, nn))
-    neighbours = np.zeros((num_points * nn)).astype(np.uint32)
-    indices = np.zeros((2 * num_points)).astype(np.int32)
-    index = 0
+    neighbours = np.zeros((num_points, nn)).astype(np.uint32)
+    indices = np.zeros((num_points, 2)).astype(np.uint32)
 
     def getnns(i):
         # print(f"Processing point {i} of {num_points}")
         # Annoy returns the query point itself as the first element
         neighbours_i, distances_i = annoy_index.get_nns_by_item(
-            i, nn + 1, include_distances=True
+            np.int32(i), nn + 1, include_distances=True
         )
-        np.put(
-            neighbours, np.arange(i * nn, (i + 1) * nn), neighbours_i[1:]
-        )  # Append nearest neighbours excluding the query point
+        neighbours[i] = neighbours_i[1:]
         distances[i] = distances_i[1:]  # Append distances excluding the query point
-        np.put(indices, [2 * i, (2 * i) + 1], (i * nn, nn))
+        indices[i] = [i * nn, nn]  # offset size
 
     # Parallel processing to speed up the nearest neighbor search
 
     num_jobs = cpu_count()
-    Parallel(n_jobs=num_jobs, require="sharedmem")(
+    Parallel(n_jobs=10, require="sharedmem", prefer="threads")(
         delayed(getnns)(i) for i in range(num_points)
     )
 
-    return distances, neighbours, indices
+    return (
+        np.ascontiguousarray(distances),
+        np.ascontiguousarray(neighbours.reshape(num_points * nn)),
+        np.ascontiguousarray(indices.reshape(num_points * 2)),
+    )
 
 
 class DataMap:
