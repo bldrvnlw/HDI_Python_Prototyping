@@ -1,8 +1,9 @@
   #version 430
+
   layout(std430, binding = 0) buffer Pos{ vec2 Positions[]; };
   layout(std430, binding = 1) buffer Neigh { uint Neighbours[]; };
-  layout(std430, binding = 2) buffer Prob { float Probabilities[]; };
-  layout(std430, binding = 3) buffer Ind { int Indices[]; };
+  layout(std430, binding = 2) buffer Ind { uint Indices[]; };
+  layout(std430, binding = 3) buffer Prob { float Probabilities[]; };
   layout(std430, binding = 4) buffer Fiel { vec4 Fields[]; };
   layout(std430, binding = 5) buffer Grad { vec2 Gradients[]; };
   layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
@@ -12,22 +13,23 @@
 
   //layout(rg32f) uniform image2D point_tex;
 
-  layout (push_constant) uniform StencilPushConstants {
-    uint num_points; 
+  layout (push_constant) uniform ForcesPushConstants {
+    float f_num_points; 
     float exaggeration;
     float sum_Q; 
   } pc;
 
 
   void main() {
+
     uint i = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
     uint groupSize = gl_WorkGroupSize.x;
     uint lid = gl_LocalInvocationID.x;
 
-    float inv_num_points = 1.0 / float(pc.num_points);
+    float inv_num_points = 1.0 / float(pc.f_num_points);
     float inv_sum_Q = 1.0 / pc.sum_Q;
-
-    if (i >= pc.num_points)
+    uint num_points = uint(pc.f_num_points);
+    if (i >= num_points)
       return;
 
     // Get the point coordinates
@@ -36,10 +38,11 @@
     //computing positive forces
     vec2 sum_positive = vec2(0);
 
-    int index = Indices[i * 2 + 0];
-    int size = Indices[i * 2 + 1];
+    uint index = Indices[2*i];
+    uint size = Indices[2*i + 1];
 
     vec2 positive_force = vec2(0);
+    uint n_index;
     for (uint j = lid; j < size; j += group_size) {
       // Get other point coordinates
       vec2 point_j = Positions[Neighbours[index + j]];
@@ -54,11 +57,13 @@
       positive_force += Probabilities[index + j] * qij * dist * inv_num_points;
     }
 
+  
     // Reduce add sum_positive_red to a single value
     if (lid >= 32) {
       sum_positive_red[lid - 32] = positive_force;
     }
     barrier();
+    memoryBarrierShared();
     if (lid < 32) {
       sum_positive_red[lid] += positive_force;
     }
@@ -70,6 +75,7 @@
       }
     }
     barrier();
+    memoryBarrierShared();
     if (lid < 1) {
       sum_positive = sum_positive_red[0] + sum_positive_red[1];
 
