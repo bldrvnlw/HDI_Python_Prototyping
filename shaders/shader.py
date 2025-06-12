@@ -106,7 +106,7 @@ class StencilShader:
         # print(f"Points  {points}")
         stencil_np_array = np.zeros((height, width, 4), dtype=np.uint8)
         stencil_out = mgr.image(stencil_np_array, width, height, 4)
-        print(f"Tensor points in shape: {points_in.size()}")
+        # print(f"Tensor points in shape: {points_in.size()}")
         push_constants = [
             bounds[0],
             bounds[1],
@@ -268,8 +268,8 @@ class InterpolationShader:
 
         self.sumQ = sum_out.data()
         # return (interp_fields, )
-        print(f"Sum: {self.sumQ}")
-        print(f"Interpolation {self.interp_fields} ")
+        print(f"Interpolation Sum: {self.sumQ}")
+        # print(f"Interpolation {self.interp_fields} ")
 
 
 class ForcesShader:
@@ -323,7 +323,7 @@ class ForcesShader:
 
         grad = gradients_out.data()
         # return (interp_fields, )
-        print(f"Gradient: {grad}")
+        # print(f"Gradient: {grad}")
 
 
 class UpdateShader:
@@ -375,7 +375,7 @@ class UpdateShader:
         seq.eval()
 
         updated_points = points_in.data()
-        print(f"Updated points: {updated_points}")
+        # print(f"Updated points: {updated_points}")
 
 
 class CenterScaleShader:
@@ -422,4 +422,4 @@ class CenterScaleShader:
         seq.eval()
 
         updated_points = points_in.data()
-        print(f"Updated points after center and scale: {updated_points}")
+        # print(f"Updated points after center and scale: {updated_points}")

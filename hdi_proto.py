@@ -15,12 +15,30 @@ from prob_utils import (
     euclidian_sqrdistance_matrix,
     compute_perplexity_probs,
     symmetrize_P,
+    get_random_uniform_circular_embedding,
 )
 from shaders.persistent_tensors import (
     LinearProbabilityMatrix,
     PersistentTensors,
     ShaderBuffers,
 )
+from sklearn.datasets import make_classification
+
+# a number of points for the test
+num_points = 2**16
+
+# Genrate some random clustered data
+X, y = make_classification(
+    n_features=1000,
+    n_classes=10,
+    n_samples=num_points,
+    n_informative=4,
+    random_state=5,
+    n_clusters_per_class=1,
+)
+
+# randomly initialize the embedding
+points = get_random_uniform_circular_embedding(num_points, 0.1)
 
 bounds_shader = BoundsShader()
 stencil_shader = StencilShader()
@@ -30,23 +48,21 @@ forces_shader = ForcesShader()
 update_shader = UpdateShader()
 centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
-points = (np.random.rand(2**16, 2).astype(np.float32) * 128) - (64, 64)
-print(f"Points {points}")
-print(f"Points max {np.max(points)} min {np.min(points)}")
+
 
 perplexity = 30
 perplexity_multiplier = 3
 nn = perplexity * perplexity_multiplier + 1
 
 distances, neighbours, indices = compute_annoy_probabilities(
-    data=points,
+    data=X,
     num_trees=4,
     nn=nn,
 )
 
-print(f"dist {distances.shape} distances {distances}")
-print(f"indices {indices.shape} indices {indices}")
-print(f"neigh {neighbours.shape} neighbours {neighbours}")
+# print(f"dist {distances.shape} distances {distances}")
+# print(f"indices {indices.shape} indices {indices}")
+# print(f"neigh {neighbours.shape} neighbours {neighbours}")
 
 # D = euclidian_sqrdistance_matrix(points)
 # Compute the perplexity probabilities
@@ -55,7 +71,7 @@ print(f"neigh {neighbours.shape} neighbours {neighbours}")
 P_s = P  # skip symmetrization for now
 
 print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
-print(f"Perplexity matrix {P}")
+# print(f"Perplexity matrix {P}")
 print(f"sigmas {sigmas}")
 
 # Create a manager for the shaders
@@ -70,15 +86,17 @@ prob_matrix = LinearProbabilityMatrix(
 
 # Create the persistent buffers
 persistent_tensors = PersistentTensors(
-    mgr=mgr, num_points=points.shape[0], prob_matrix=prob_matrix
+    mgr=mgr, num_points=num_points, prob_matrix=prob_matrix
 )
 
 
 # for all iterations
-for i in range(1):
+num_iterations = 500
+print("Starting GPU iterations")
+for i in range(num_iterations):
     bounds = bounds_shader.compute(
         mgr=mgr,
-        num_points=points.shape[0],
+        num_points=num_points,
         padding=0.1,
         points=points,
         persistent_tensors=persistent_tensors,
@@ -98,14 +116,14 @@ for i in range(1):
         mgr=mgr,
         width=width,
         height=width,
-        num_points=points.shape[0],
+        num_points=num_points,
         persistent_tensors=persistent_tensors,
     )
     print(f"Stencil shape {stencil.shape} dtype {stencil.dtype}")
 
     fields = fields_shader.compute(
         mgr=mgr,
-        num_points=points.shape[0],
+        num_points=num_points,
         stencil=stencil,
         width=width,
         height=height,
@@ -116,7 +134,7 @@ for i in range(1):
 
     interpolation_shader.compute(
         mgr=mgr,
-        num_points=points.shape[0],
+        num_points=num_points,
         fields=fields,
         width=width,
         height=height,
@@ -129,14 +147,14 @@ for i in range(1):
     exaggeration = 4.0  # should decay at a certain point
     forces_shader.compute(
         mgr=mgr,
-        num_points=points.shape[0],
+        num_points=num_points,
         exaggeration=exaggeration,
         persistent_tensors=persistent_tensors,
     )
 
     update_shader.compute(
         mgr=mgr,
-        num_points=points.shape[0],
+        num_points=num_points,
         eta=200.0,
         minimum_gain=0.1,
         iteration=i,
@@ -147,10 +165,10 @@ for i in range(1):
         persistent_tensors=persistent_tensors,
     )
     updated_points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
-    print(f"New points {updated_points}")
+    # print(f"New points {updated_points}")
     bounds = bounds_shader.compute(
         mgr=mgr,
-        num_points=points.shape[0],
+        num_points=num_points,
         padding=0.1,
         points=updated_points,  # skip this because it is in the tensor
         persistent_tensors=persistent_tensors,
@@ -159,14 +177,15 @@ for i in range(1):
     print(f"New bounds {updated_bounds}")
     centerscale_shader.compute(
         mgr=mgr,
-        num_points=points.shape[0],
+        num_points=num_points,
         exaggeration=exaggeration,
         persistent_tensors=persistent_tensors,
     )
-    updated_points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
-    print(f"Centered points {updated_points}")
+    # get the updated points
+    points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
+    # print(f"Centered points {updated_points}")
 
-
+print("Iterations complete")
 mgr.destroy()
 # stencil = stencil.reshape(height, width, 4)  # colours
 

@@ -166,6 +166,37 @@ def compute_annoy_probabilities(
     )
 
 
+def get_random_uniform_circular_embedding(
+    num_points: int, radius: float
+) -> np.ndarray[np.float32]:
+    """Generate a ndarray shape: (num_points, 2) containing x,y coordinates
+    of points uniformly distributed within the circle of given radius
+    centered on 0.
+
+    Args:
+        num_points (int): The number of 2D points to generate
+        range (float): The radius of the circle
+
+    Returns:
+        np.ndarray[np.float32]: The uniform circular distrubution
+    """
+    rng = np.random.default_rng()
+    x = radius + 0.1
+    y = radius * 1.1
+    sqr_rad = radius * radius
+    result = np.zeros((num_points, 2), dtype=np.float32)
+    for i in range(num_points):
+        while x**2 + y**2 > sqr_rad:
+            r_point = rng.uniform(-1, 0, 2).astype(np.float32)
+            x = r_point[0]
+            y = r_point[1]
+        result[i] = r_point
+        x = radius + 0.1
+        y = radius + 0.1
+
+    return result
+
+
 class DataMap:
     """
     Class to manage a mapping of data points to their indices and distances.
