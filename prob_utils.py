@@ -2,6 +2,8 @@ import numpy as np
 from annoy import AnnoyIndex
 from joblib import cpu_count, Parallel, delayed
 from typing import Tuple, List
+from numba import njit
+from scipy.sparse import coo_matrix
 
 
 def euclidian_sqrdistance_matrix(
@@ -27,13 +29,21 @@ def euclidian_sqrdistance_matrix(
 
 
 # Stolen from scipy tSNE implementation
-
-
 def _h_beta(D_row, beta):
     P = np.exp(-D_row * beta)
     sumP = np.sum(P)
     P = P / sumP
     H = -np.sum(P * np.log(P + 1e-10))  # add epsilon for numerical stability
+    return H, P
+
+
+# alternative with numba
+@njit
+def _h_beta_numba(D_row, beta):
+    P = np.exp(-D_row * beta)
+    sumP = np.sum(P)
+    P = P / (sumP + 1e-10)
+    H = -np.sum(P * np.log(P + 1e-10))
     return H, P
 
 
@@ -92,6 +102,76 @@ def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=50):
         sigmas[i] = np.sqrt(1 / (2 * beta))
 
     return P, sigmas
+
+
+# alternative with numba
+@njit
+def binary_search_perplexity_numba(D_trunc, target_entropy, tol=1e-5, max_iter=50):
+    N, nn = D_trunc.shape
+    P = np.zeros((N, nn))
+    sigmas = np.ones(N)
+
+    for i in range(N):
+        beta_min = -np.inf
+        beta_max = np.inf
+        beta = 1.0
+
+        Di = D_trunc[i]
+        H, thisP = _h_beta_numba(Di, beta)
+
+        iter_count = 0
+        while np.abs(H - target_entropy) > tol and iter_count < max_iter:
+            if H > target_entropy:
+                beta_min = beta
+                if beta_max == np.inf:
+                    beta *= 2.0
+                else:
+                    beta = (beta + beta_max) / 2.0
+            else:
+                beta_max = beta
+                if beta_min == -np.inf:
+                    beta /= 2.0
+                else:
+                    beta = (beta + beta_min) / 2.0
+
+            H, thisP = _h_beta_numba(Di, beta)
+            iter_count += 1
+
+        P[i] = thisP
+        sigmas[i] = np.sqrt(1 / (2 * beta))
+
+    return P, sigmas
+
+
+def compute_perplexity_probs_numba(D, perplexity=30.0, tol=1e-5, max_iter=50):
+    target_entropy = np.log(perplexity)
+    return binary_search_perplexity_numba(D, target_entropy, tol, max_iter)
+
+
+def symmetrize_sparse_probs(P_cond, neighbors, N, nn):
+    rows, cols, data = [], [], []
+
+    for i in range(N):
+        for k in range(nn):
+            j = neighbors[i * nn + k]
+            pij = P_cond[i, k]
+
+            # Check if j also has i in its neighbor list
+            try:
+                rev_idx = np.where(neighbors[j] == i)[0]
+                if rev_idx.size > 0:
+                    pji = P_cond[j, rev_idx[0]]
+                    pij_sym = (pij + pji) / (2 * N)
+                else:
+                    pij_sym = pij / (2 * N)
+            except IndexError:
+                pij_sym = pij / (2 * N)
+
+            rows.append(i)
+            cols.append(j)
+            data.append(pij_sym)
+
+    return coo_matrix((data, (rows, cols)), shape=(N, N))
 
 
 def symmetrize_P(P_cond):
@@ -182,12 +262,12 @@ def get_random_uniform_circular_embedding(
     """
     rng = np.random.default_rng()
     x = radius + 0.1
-    y = radius * 1.1
+    y = radius + 0.1
     sqr_rad = radius * radius
     result = np.zeros((num_points, 2), dtype=np.float32)
     for i in range(num_points):
         while x**2 + y**2 > sqr_rad:
-            r_point = rng.uniform(-1, 0, 2).astype(np.float32)
+            r_point = rng.uniform(-1, 1, 2).astype(np.float32) * radius
             x = r_point[0]
             y = r_point[1]
         result[i] = r_point
