@@ -1,6 +1,8 @@
 import numpy as np
 from enum import IntEnum
 from kp import Manager, Tensor
+from scipy.sparse import coo_matrix
+from typing import Self
 
 
 class ShaderBuffers(IntEnum):
@@ -24,6 +26,8 @@ class ShaderBuffers(IntEnum):
 
 
 class LinearProbabilityMatrix:
+    """A holder class for conditional probabilities and neighbours"""
+
     def __init__(
         self,
         neighbours: np.ndarray[np.uint32],
@@ -41,6 +45,40 @@ class LinearProbabilityMatrix:
         self.neighbours = neighbours
         self.probabilities = probabilities
         self.indices = indices
+
+    @classmethod
+    def from_sparse_probs(
+        cls,
+        neighbours: np.ndarray[np.uint32],
+        sparse_probabilities: coo_matrix,
+        indices: np.ndarray[np.int32],
+        num_points: int,
+        nn: int,
+    ) -> Self:
+        """Alternate constructor based on sparse prob matrix
+        The probabilities ar compactified into a one dmensional vector
+
+        Args:
+            neighbours (np.ndarray[np.uint32]): point->nearest neighbour indices array
+            sparse_probabilities (coo_matrix): sparse symmetrized conditional probability for points and nearest neighbours
+            indices (np.ndarray[np.int32]): offset and lengths into neighbours array
+            nn int: num neighbours
+
+        Raises:
+            ValueError: _description_
+            ValueError: _description_
+
+        Returns:
+            LinearProbabilityMatrix: initialized probability matrix
+        """
+        probabilities = np.zeros((num_points * nn))
+        offset = 0
+        for i in range(num_points):
+            mask = sparse_probabilities.row == i
+            values = sparse_probabilities.data[mask]
+            probabilities[range(offset, offset + nn)] = values
+            offset += nn
+        return cls(neighbours, probabilities, indices)
 
 
 class PersistentTensors:
