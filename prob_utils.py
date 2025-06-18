@@ -4,6 +4,7 @@ from joblib import cpu_count, Parallel, delayed
 from typing import Tuple, List
 from numba import njit
 from scipy.sparse import coo_matrix
+from openTSNE import affinity
 
 
 def euclidian_sqrdistance_matrix(
@@ -300,3 +301,50 @@ class DataMap:
             f"DataMap(indices.shape={self.indices.shape},"
             f" distances.shape={self.distances.shape})"
         )
+
+
+def getProbabilitiesOpenTSNE(
+    X: np.ndarray,
+    perplexity: int = 30,
+    metric: str = "euclidean",
+    njobs: int = 20,
+    symmetrize: bool = True,
+    verbose: bool = True,
+):
+    # defaults to annot
+    affinities = affinity.PerplexityBasedNN(
+        X,
+        perplexity=perplexity,
+        metric=metric,
+        n_jobs=njobs,
+        symmetrize=symmetrize,
+        verbose=verbose,
+    )
+    P = affinities.P
+    P.sort_indices()
+    num_points = X.shape[0]
+    indices = np.empty((num_points * 2), dtype=np.uint32)
+
+    offset = 0
+    length = 0
+    total = 0
+    for i in range(P.shape[0]):
+        row = P.getrow(i)
+        indices[i * 2] = offset
+        length = row.data.shape[0]
+        indices[i * 2 + 1] = length
+        total = total + length
+        offset += length
+
+    neighbours = np.empty((total), dtype=np.uint32)
+    probabilities = np.empty((total), dtype=np.float32)
+    for i in range(P.shape[0]):
+        row = P.getrow(i)
+        neighbours[range(indices[i * 2], indices[i * 2] + indices[i * 2 + 1])] = (
+            row.indices
+        )
+        probabilities[range(indices[i * 2], indices[i * 2] + indices[i * 2 + 1])] = (
+            row.data
+        )
+
+    return neighbours, probabilities, indices

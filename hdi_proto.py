@@ -9,14 +9,17 @@ from shaders.shader import (
 )
 import sys
 import math
+import time
 import numpy as np
 from kp import Manager
+from openTSNE import affinity
 from prob_utils import (
     compute_annoy_probabilities,
     euclidian_sqrdistance_matrix,
     compute_perplexity_probs_numba,
     symmetrize_sparse_probs,
     get_random_uniform_circular_embedding,
+    getProbabilitiesOpenTSNE,
 )
 from shaders.persistent_tensors import (
     LinearProbabilityMatrix,
@@ -34,6 +37,7 @@ X = X_dataframe.to_numpy()[0:5000]
 y = y_series.to_numpy()[0:5000]
 print(f"MNIST: data shape {X.shape} labels shape {y.shape}")
 import matplotlib.pyplot as plt
+import matrix_viewer
 
 # a number of points for the test
 # num_points = 2**16
@@ -75,14 +79,14 @@ centerscale_shader = CenterScaleShader()
 
 
 perplexity = 30
-perplexity_multiplier = 3
-nn = perplexity * perplexity_multiplier + 1
+# perplexity_multiplier = 3
+# nn = perplexity * perplexity_multiplier + 1
 
-distances, neighbours, indices = compute_annoy_probabilities(
-    data=X,
-    num_trees=int(math.sqrt(num_points)),
-    nn=nn,
-)
+# distances, neighbours, indices = compute_annoy_probabilities(
+#    data=X,
+#    num_trees=int(math.sqrt(num_points)),
+#    nn=nn,
+##)
 
 # print(f"dist {distances.shape} distances {distances}")
 # print(f"indices {indices.shape} indices {indices}")
@@ -90,32 +94,33 @@ distances, neighbours, indices = compute_annoy_probabilities(
 
 # D = euclidian_sqrdistance_matrix(points)
 # Compute the perplexity probabilities
-P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
-sparse_probs = symmetrize_sparse_probs(P, neighbours, num_points, nn)
+# P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
+# sparse_probs = symmetrize_sparse_probs(P, neighbours, num_points, nn)
 # P_s = symmetrize_P(P)
 # P_s = P  # skip symmetrization for now
 
-print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
+# print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
 # print(f"Perplexity matrix {P}")
-print(f"sigmas {sigmas}")
+# print(f"sigmas {sigmas}")
 
+neighbours, probabilities, indices = getProbabilitiesOpenTSNE(X, perplexity=perplexity)
 # Create a manager for the shaders
 # and persistent buffers
 mgr = Manager()
 
-# prob_matrix = LinearProbabilityMatrix(
-#    neighbours=neighbours,
-#    probabilities=P_s,
-#    indices=indices,
-# )
-
-prob_matrix = LinearProbabilityMatrix.from_sparse_probs(
+prob_matrix = LinearProbabilityMatrix(
     neighbours=neighbours,
-    sparse_probabilities=sparse_probs,
+    probabilities=probabilities,
     indices=indices,
-    num_points=num_points,
-    nn=nn,
 )
+
+# prob_matrix = LinearProbabilityMatrix.from_sparse_probs(
+#    neighbours=neighbours,
+#    sparse_probabilities=sparse_probs,
+#    indices=indices,
+#    num_points=num_points,
+#    nn=nn,
+# )
 
 
 # Create the persistent buffers
@@ -131,8 +136,10 @@ end_exaggeration = 1.0
 decay_start = 250
 decay_length = 100
 
-plt.figure(0)
-plt.scatter(points[:, 0], points[:, 1], c=colors, alpha=0.7)
+# plt.figure(0)
+# plt.scatter(points[:, 0], points[:, 1], c=colors, alpha=0.7)
+a_num_points = np.array([num_points], dtype=np.uint32)
+persistent_tensors.set_tensor_data(ShaderBuffers.NUM_POINTS, a_num_points)
 
 print("Starting GPU iterations")
 for i in range(num_iterations):
@@ -144,9 +151,7 @@ for i in range(num_iterations):
         )
     elif i > decay_start + decay_length:
         exaggeration = 1
-    if exaggeration <= 1.2:
-        print("Breaking for low exaggeration")
-        break
+
     print("**********************************************************")
     print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
     bounds = bounds_shader.compute(
@@ -178,7 +183,9 @@ for i in range(num_iterations):
         persistent_tensors=persistent_tensors,
     )
     print(f"Stencil shape {stencil.shape} dtype {stencil.dtype}")
-
+    # print(stencil)
+    # matrix_viewer.view(stencil[..., 0])
+    # matrix_viewer.show_with_pyplot()
     fields = fields_shader.compute(
         mgr=mgr,
         num_points=num_points,
@@ -201,7 +208,6 @@ for i in range(num_iterations):
 
     if interpolation_shader.sumQ[0] == 0:
         print("!!!! Breaking out due to interpolation sum 0 !!!!")
-        plt.show()
         break
 
     forces_shader.compute(
@@ -234,10 +240,9 @@ for i in range(num_iterations):
     )
     updated_bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
     print(f"Updated bounds after point move {updated_bounds}")
-    if exaggeration <= 1.2:
-        print("Breaking for low exaggeration")
-        plt.show()
-        break
+    # if exaggeration <= 1.2:
+    #    print("Breaking for low exaggeration")
+    #    break
     centerscale_shader.compute(
         mgr=mgr,
         num_points=num_points,
@@ -251,14 +256,18 @@ for i in range(num_iterations):
     # print(f"Centered points {updated_points}")
 
     xy = points.reshape(num_points, 2)
-    plt.figure(i + 1)
-    plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+    if (i - 1) % 50 == 0:
+        plt.figure(i)
+        plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+        plt.show(block=False)
+        # time.sleep(0.5)
 
 
 points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
 xy = points.reshape(num_points, 2)
 print(f"xy.shape {xy.shape}")
 # mgr.destroy()
-# plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+plt.figure(i)
+plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
 plt.show()
 print("Iterations complete")
