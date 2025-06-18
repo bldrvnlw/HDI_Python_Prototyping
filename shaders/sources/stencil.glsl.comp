@@ -10,6 +10,8 @@ layout(std430, binding = 0) buffer Points {
 // Output image
 layout(rgba8, binding = 1) writeonly uniform image2D outImage;
 
+layout(std430, binding = 2) buffer Dbg { vec2 Bug[]; };
+
 
 // Push constants for rectangle bounds and image dimensions
 layout (push_constant) uniform StencilPushConstants {
@@ -31,13 +33,14 @@ void main() {
     ivec2 pxCoord = ivec2(norm * pc.imageSize);
     
     // Draw a 3x3 region around the point
+    Bug[id] = pxCoord;
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
             ivec2 target = pxCoord + ivec2(dx, dy);
             // Bounds check
             if (target.x >= 0 && target.x < pc.imageSize.x &&
                 target.y >= 0 && target.y < pc.imageSize.y) {
-                imageStore(outImage, target, vec4(1.0));
+                imageStore(outImage, target, ivec4(1));
             }
         }
     }

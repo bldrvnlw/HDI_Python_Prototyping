@@ -4,15 +4,16 @@
   layout(std430, binding = 0) buffer Pos{ vec2 Positions[]; };
   layout(std430, binding = 1) buffer BoundsInterface { vec2 Bounds[]; };
 
+
   layout(binding = 2, rgba32f) writeonly uniform image2D Fields;
   layout(binding = 3, rgba8) readonly uniform image2D Stencil;
+  layout(std430, binding = 4) readonly buffer NumPoints { uint NP[]; };
 
   const uint groupSize = gl_WorkGroupSize.x;
   const uint hgSize = groupSize / 2;
   shared vec3 reduction_array[hgSize];
 
   layout(push_constant) uniform FieldPushConstants {
-    float num_points;
     vec2 imageSize;
     float support; 
   } pc;
@@ -42,8 +43,7 @@
     // Stride over the point positions by the group size
     // calculating field (vector and scalar) contribution
     // at this pixel position based on the point distance.
-    uint num_points = uint(pc.num_points);
-    for (uint i = lid; i < num_points; i += groupSize)
+    for (uint i = lid; i < NP[0]; i += groupSize)
     {
       // Distance between pixel and kernel center in domain units
       vec2 t = pixel_pos - Positions[i];

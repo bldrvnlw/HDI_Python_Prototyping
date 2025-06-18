@@ -6,6 +6,7 @@ import math
 import sys
 from typing import Annotated
 from shaders.persistent_tensors import PersistentTensors, ShaderBuffers
+import time
 
 
 class Shader:
@@ -66,22 +67,29 @@ class BoundsShader:
         #
         persistent_tensors.set_tensor_data(ShaderBuffers.POSITION, points)
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
-        # print(points_in.data(), points_in.data().shape)
         bounds_out = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
-        # print(bounds_out.data(), bounds_out.data().shape)
+        # debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
+        num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
 
-        params = [bounds_out, points_in]
+        params = [bounds_out, points_in, num_points_tensor]
         algorithm = mgr.algorithm(
             tensors=params,
             spirv=self.shader_code.spv,
             workgroup=[1, 1, 1],
-            push_consts=[num_points, padding],
+            push_consts=[padding],
         )
+        (
+            mgr.sequence()
+            .record(kp.OpSyncDevice(params))
+            .record(kp.OpAlgoDispatch(algorithm))
+            .eval()
+        )
+
         seq = mgr.sequence()
-        seq.record(kp.OpSyncDevice(params))
-        seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([bounds_out]))
-        seq.eval()
+        seq.eval_async(kp.OpSyncLocal([bounds_out]))
+        seq.eval_await()
+
+        # dbg_data = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
         return bounds_out.data().reshape(2, 2)
 
 
@@ -100,12 +108,15 @@ class StencilShader:
     ):
         bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
+        debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
+
         print(f"bounds {bounds}")
         np.set_printoptions(threshold=sys.maxsize)
         # print(f"Points  {points}")
         stencil_np_array = np.zeros((height, width, 4), dtype=np.uint8)
         stencil_out = mgr.image(stencil_np_array, width, height, 4)
         # print(f"Tensor points in shape: {points_in.size()}")
+        print(f"stencil size width: {width} height: {height}")
         push_constants = [
             bounds[0],
             bounds[1],
@@ -119,26 +130,35 @@ class StencilShader:
             tensors=[
                 points_in,
                 stencil_out,
+                debug,
             ],  # The stencil_tensor is the only output parameter
             spirv=self.shader_code.spv,
             workgroup=[num_points, 1, 1],  # defaults to tensor[0].size,1,1
             push_consts=push_constants,
         )
+        (
+            mgr.sequence()
+            .record(kp.OpSyncDevice([points_in, stencil_out]))
+            .record(kp.OpAlgoDispatch(algorithm))
+            .eval()
+        )
+
         seq = mgr.sequence()
-        seq.record(kp.OpSyncDevice([points_in, stencil_out]))
-        seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([stencil_out]))
-        seq.eval()
+        seq.eval_async(kp.OpSyncLocal([stencil_out, debug]))
+        seq.eval_await()
+
         generated_stencil = (
             np.array(stencil_out.data()).reshape(height, width, 4).astype(np.uint8)
         )
+        debug = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
+
         print(
             f"Generated stencil shape: {generated_stencil.shape}  dtype:"
             f" {generated_stencil.dtype}"
         )
 
         # print(f"Stencil: {generated_stencil[..., 0]}")  # Print only the first channel
-        np.savetxt("stencil_output.txt", generated_stencil[..., 0], fmt="%i")
+        # np.savetxt("stencil_output.txt", generated_stencil[..., 0], fmt="%i")
         # input("Press Enter to continue...")
 
         return generated_stencil
@@ -154,21 +174,7 @@ class FieldComputationShader:
             (self.kernel_width, self.kernel_width, 4), dtype=np.float32
         )
         self.func_support: float = 6.5
-        # self.generateRasterTSNEKernel(self.func_support)
         self.field_texture: np.array = None
-
-    # def generateRasterTSNEKernel(self, func_support: float):
-
-    #     for i in range(self.kernel_width):
-    #         for j in range(self.kernel_width):
-    #             x = (i - self.kernel_radius) / (self.kernel_radius * func_support)
-    #             y = (j - self.kernel_radius) / (self.kernel_radius * func_support)
-    #             tstud = 1.0 / (1.0 + x * x + y * y)
-    #             off = (j * self.kernel_width + i) * 4
-    #             self.TSNEKernel[i, j, 0] = tstud
-    #             self.TSNEKernel[i, j, 1] = tstud * tstud * x
-    #             self.TSNEKernel[i, j, 2] = tstud * tstud * y
-    #             self.TSNEKernel[i, j, 3] = 0
 
     def compute(
         self,
@@ -179,35 +185,32 @@ class FieldComputationShader:
         height: int,
         persistent_tensors: PersistentTensors,
     ):
-        # np.set_printoptions(threshold=sys.maxsize)
-        # print(f"TSNEKernel shape: {self.TSNEKernel.shape}")
-        # print(f"TSNEKernel dtype: {self.TSNEKernel.dtype}")
-        # print(f"TSNEKernel: {self.TSNEKernel}")
         field_out = mgr.image(
             np.zeros((height, width, 4), dtype=np.float32), width, height, 4
         )
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
+        num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
         stencil_in = mgr.image(stencil, width, height, 4)
-        params = [points_in, bounds_in, field_out, stencil_in]
+        params = [points_in, bounds_in, field_out, stencil_in, num_points_tensor]
         print(f"Num points: {num_points}")
-        push_constants = [
-            float(num_points),
-            float(width),
-            float(height),
-            self.func_support,
-        ]
+        push_constants = [float(width), float(height), self.func_support]
         algorithm = mgr.algorithm(
             tensors=params,  # The stencil_tensor is the only output parameter
             spirv=self.shader_code.spv,
             workgroup=[width, height, 1],  # Global dispatch 1 thread per pixel
             push_consts=push_constants,
         )
+        (
+            mgr.sequence()
+            .record(kp.OpSyncDevice(params))
+            .record(kp.OpAlgoDispatch(algorithm))
+            .eval()
+        )
+
         seq = mgr.sequence()
-        seq.record(kp.OpSyncDevice(params))
-        seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([field_out]))
-        seq.eval()
+        seq.eval_async(kp.OpSyncLocal([field_out]))
+        seq.eval_await()
 
         print(f"Field shape {field_out.data().shape} ")
         generated_field = (
@@ -238,14 +241,21 @@ class InterpolationShader:
 
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
+        num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
         fields_in = mgr.tensor(np.reshape(fields, (height * width, 4)))
 
-        params = [points_in, fields_in, interp_fields_out, sum_out, bounds_in]
+        params = [
+            points_in,
+            fields_in,
+            interp_fields_out,
+            sum_out,
+            bounds_in,
+            num_points_tensor,
+        ]
         print(f"Width: {width}  height : {height}")
         push_constants = [
             float(width),
             float(height),
-            float(num_points),
         ]
         algorithm = mgr.algorithm(
             tensors=params,  # The stencil_tensor is the only output parameter
@@ -253,20 +263,23 @@ class InterpolationShader:
             workgroup=[1, 1, 1],  # Global dispatch 1 thread per pixel
             push_consts=push_constants,
         )
+        (
+            mgr.sequence()
+            .record(kp.OpSyncDevice(params))
+            .record(kp.OpAlgoDispatch(algorithm))
+            .eval()
+        )
+
         seq = mgr.sequence()
-        seq.record(kp.OpSyncDevice(params))
-        seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([interp_fields_out, sum_out]))
-        seq.eval()
+        seq.eval_async(kp.OpSyncLocal([interp_fields_out, sum_out]))
+        seq.eval_await()
 
         self.interp_fields = (
             np.array(interp_fields_out.data()).reshape(num_points, 4).astype(np.float32)
         )
 
         self.sumQ = sum_out.data()
-        # return (interp_fields, )
         print(f"Interpolation Sum: {self.sumQ}")
-        # print(f"Interpolation {self.interp_fields} ")
 
 
 class ForcesShader:
@@ -287,6 +300,7 @@ class ForcesShader:
         index_in = persistent_tensors.get_tensor(ShaderBuffers.INDEX)
         interp_fields_in = persistent_tensors.get_tensor(ShaderBuffers.INTERP_FIELDS)
         gradients_out = persistent_tensors.get_tensor(ShaderBuffers.GRADIENTS)
+        num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
 
         params = [
             points_in,
@@ -295,13 +309,13 @@ class ForcesShader:
             prob_in,
             interp_fields_in,
             gradients_out,
+            num_points_tensor,
         ]
         sumq_data = persistent_tensors.get_tensor_data(ShaderBuffers.SUM_Q)
 
         push_constants = [
             exaggeration,
             sumq_data[0],
-            num_points,
         ]
 
         grid_size = int(math.sqrt(num_points) + 1)
@@ -312,11 +326,16 @@ class ForcesShader:
             workgroup=[grid_size, grid_size, 1],  # Global dispatch 1 thread per pixel
             push_consts=push_constants,
         )
+        (
+            mgr.sequence()
+            .record(kp.OpSyncDevice(params))
+            .record(kp.OpAlgoDispatch(algorithm))
+            .eval()
+        )
+
         seq = mgr.sequence()
-        seq.record(kp.OpSyncDevice(params))
-        seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([gradients_out]))
-        seq.eval()
+        seq.eval_async(kp.OpSyncLocal([gradients_out]))
+        seq.eval_await()
 
         grad = gradients_out.data()
         # return (interp_fields, )
@@ -345,8 +364,15 @@ class UpdateShader:
         gradients_in = persistent_tensors.get_tensor(ShaderBuffers.GRADIENTS)
         prev_gradients_in = persistent_tensors.get_tensor(ShaderBuffers.PREV_GRADIENTS)
         gain_in = persistent_tensors.get_tensor(ShaderBuffers.GAIN)
+        num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
 
-        params = [points_in, gradients_in, prev_gradients_in, gain_in]
+        params = [
+            points_in,
+            gradients_in,
+            prev_gradients_in,
+            gain_in,
+            num_points_tensor,
+        ]
 
         push_constants = [
             float(eta),
@@ -356,7 +382,6 @@ class UpdateShader:
             float(momentum),
             float(momentum_final),
             float(gain_multiplier),
-            num_points,
         ]
         num_workgroups = int(num_points * 2 / 64) + 1
         grid_size = int(math.sqrt(num_workgroups) + 1)
@@ -366,11 +391,16 @@ class UpdateShader:
             workgroup=[grid_size, grid_size, 1],  # Global dispatch 1 thread per pixel
             push_consts=push_constants,
         )
+        (
+            mgr.sequence()
+            .record(kp.OpSyncDevice(params))
+            .record(kp.OpAlgoDispatch(algorithm))
+            .eval()
+        )
+
         seq = mgr.sequence()
-        seq.record(kp.OpSyncDevice(params))
-        seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([points_in, prev_gradients_in, gain_in]))
-        seq.eval()
+        seq.eval_async(kp.OpSyncLocal([points_in, prev_gradients_in, gain_in]))
+        seq.eval_await()
 
         updated_points = points_in.data()
         # print(f"Updated points: {updated_points}")
@@ -390,9 +420,10 @@ class CenterScaleShader:
     ):
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
-        debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
+        # debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
+        num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
 
-        params = [points_in, bounds_in, debug]
+        params = [points_in, bounds_in, num_points_tensor]
         if exaggeration > 1.2:
             scale = 1.0
             diameter = 0.1
@@ -415,12 +446,17 @@ class CenterScaleShader:
             workgroup=[grid_size, grid_size, 1],  # Global dispatch 1 thread per pixel
             push_consts=push_constants,
         )
+        (
+            mgr.sequence()
+            .record(kp.OpSyncDevice(params))
+            .record(kp.OpAlgoDispatch(algorithm))
+            .eval()
+        )
+
         seq = mgr.sequence()
-        seq.record(kp.OpSyncDevice(params))
-        seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([points_in, debug]))
-        seq.eval()
-        dbg_np = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
+        seq.eval_async(kp.OpSyncLocal([points_in]))
+        seq.eval_await()
+        # dbg_np = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
         updated_points = np.reshape(points_in.data(), (num_points, 2))
         print(
             f"Update max: {np.max(updated_points, axis=0)} min:"

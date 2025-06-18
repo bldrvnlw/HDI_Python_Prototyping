@@ -6,6 +6,7 @@
   layout(std430, binding = 3) buffer Prob { float Probabilities[]; };
   layout(std430, binding = 4) buffer Fiel { vec4 Fields[]; };
   layout(std430, binding = 5) buffer Grad { vec2 Gradients[]; };
+  layout(std430, binding = 6) readonly buffer NumPoints { uint NP[]; };
   layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
   const uint group_size = 64;
@@ -14,10 +15,8 @@
   //layout(rg32f) uniform image2D point_tex;
 
   layout (push_constant) uniform ForcesPushConstants {
-    //float f_num_points; 
     float exaggeration;
     float sum_Q; 
-    uint num_points;
   } pc;
 
 
@@ -27,10 +26,9 @@
     uint groupSize = gl_WorkGroupSize.x;
     uint lid = gl_LocalInvocationID.x;
 
-    float inv_num_points = 1.0 / float(pc.num_points);
+    float inv_num_points = 1.0 / float(NP[0]);
     float inv_sum_Q = 1.0 / pc.sum_Q;
-    //uint num_points = uint(pc.f_num_points);
-    if (i >= pc.num_points)
+    if (i >= NP[0])
       return;
 
     // Get the point coordinates

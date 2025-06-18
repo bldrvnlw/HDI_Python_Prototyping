@@ -24,6 +24,9 @@ class ShaderBuffers(IntEnum):
     GAIN = (8,)  # float: num_points x 2 (gain)
     BOUNDS = (9,)  # float: 1 x 4 (min, max)
     POS_DEBUG = (10,)  # for retrieving debug info
+    NUM_POINTS = (
+        11,
+    )  # a single digit for the num_points (because of push constant limits)
 
 
 class LinearProbabilityMatrix:
@@ -128,6 +131,9 @@ class PersistentTensors:
             ShaderBuffers.POS_DEBUG: self.mgr.tensor(
                 np.zeros((self.num_points, 2), dtype=np.float32)
             ),
+            ShaderBuffers.NUM_POINTS: self.mgr.tensor_t(
+                np.zeros((1,), dtype=np.uint32)
+            ),
         }
 
     def get_tensor(self, buffer_type: ShaderBuffers) -> Tensor:
@@ -152,7 +158,7 @@ class PersistentTensors:
         """
         tensor = self.get_tensor(buffer_type)
         if tensor is not None:
-            tensor.data()[:] = data.reshape(tensor.data().shape)
+            tensor.data()[:] = data.reshape(tensor.data().shape).astype(data.dtype)
         else:
             raise ValueError(f"Buffer type {buffer_type} not found.")
 

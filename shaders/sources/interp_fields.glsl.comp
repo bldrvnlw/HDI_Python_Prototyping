@@ -4,6 +4,7 @@
   layout(std430, binding = 2) writeonly buffer ValBuf { vec4 Values[]; };
   layout(std430, binding = 3) writeonly buffer SumBuf { float Sum[]; };
   layout(std430, binding = 4) buffer BoundsInterface { vec2 Bounds[]; };
+  layout(std430, binding = 5) readonly buffer NumPoints { uint NP[]; };
 
   layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 
@@ -11,7 +12,6 @@
 
   layout(push_constant) uniform FieldPushConstants {
     vec2 imageSize;
-    float num_points;
   } pc;
 
   vec4 texel(int x, int y) {
@@ -55,8 +55,7 @@ vec4 sampleLinearField(vec2 uv) {
     vec2 inv_range = 1.0 / range;
 
     float sum_Q = 0;
-    uint num_points = uint(pc.num_points);
-    for (uint i = lid; i < num_points; i += groupSize)
+    for (uint i = lid; i < NP[0]; i += groupSize)
     {
       // Normalized position of point in range 0 to 1
       vec2 norm = (Positions[i] - min_bounds) / range;

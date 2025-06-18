@@ -2,31 +2,32 @@
 
   layout(std430, binding = 0) buffer BoundsInterface { vec2 Bounds[]; };
   layout(std430, binding = 1) buffer Pos{ vec2 Positions[]; };
+  layout(std430, binding = 2) readonly buffer NumPoints { uint NP[]; };
+  //layout(std430, binding = 3) buffer Dbg { vec2 Bug[]; };
   layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 
   shared vec2 min_reduction[64];
   shared vec2 max_reduction[64]; 
 
   layout(push_constant) uniform Params {
-      float f_num_points;   // offset 0
-      float padding;    // offset 4
-  } uparams;
+      float padding;    // offset 0
+  } pc;
 
   void main() {
     uint lid = gl_LocalInvocationIndex.x;
     uint groupSize = gl_WorkGroupSize.x;
-    uint num_points = uint(uparams.f_num_points);
     vec2 minBound = vec2(1e38);//1.0 / 0.0); // inf
     vec2 maxBound = vec2(-1e38);//-1.0 / 0.0); // -inf
 
 
     
     // Find min and max bounds by striding (by groupSize) across the positions in each thread.
-    for (uint i = lid; i < num_points; i += groupSize)
+    for (uint i = lid; i < NP[0]; i += groupSize)
     {
       vec2 pos = Positions[i];
       Bounds[0] = pos;
       Bounds[1] = pos;
+      //Bug[i] = vec2(NP[0]);
 
       minBound = min(pos, minBound);
       maxBound = max(pos, maxBound);
@@ -75,7 +76,7 @@
       minBound = min(min_reduction[0], min_reduction[1]);
       maxBound = max(max_reduction[0], max_reduction[1]);
 
-      vec2 padding = (maxBound - minBound) * uparams.padding * 0.5;
+      vec2 padding = (maxBound - minBound) * pc.padding * 0.5;
 
       minBound -= padding;
       maxBound += padding;
