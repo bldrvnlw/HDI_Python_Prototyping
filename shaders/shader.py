@@ -71,11 +71,10 @@ class BoundsShader:
         # print(bounds_out.data(), bounds_out.data().shape)
 
         params = [bounds_out, points_in]
-        workgroup = (128, 1, 1)
         algorithm = mgr.algorithm(
             tensors=params,
             spirv=self.shader_code.spv,
-            workgroup=workgroup,
+            workgroup=[1, 1, 1],
             push_consts=[num_points, padding],
         )
         seq = mgr.sequence()
@@ -133,8 +132,10 @@ class StencilShader:
         generated_stencil = (
             np.array(stencil_out.data()).reshape(height, width, 4).astype(np.uint8)
         )
-        print(f"Generated stencil shape: {generated_stencil.shape}")
-        print(f"Generated stencil dtype: {generated_stencil.dtype}")
+        print(
+            f"Generated stencil shape: {generated_stencil.shape}  dtype:"
+            f" {generated_stencil.dtype}"
+        )
 
         # print(f"Stencil: {generated_stencil[..., 0]}")  # Print only the first channel
         np.savetxt("stencil_output.txt", generated_stencil[..., 0], fmt="%i")
@@ -156,18 +157,18 @@ class FieldComputationShader:
         # self.generateRasterTSNEKernel(self.func_support)
         self.field_texture: np.array = None
 
-    def generateRasterTSNEKernel(self, func_support: float):
+    # def generateRasterTSNEKernel(self, func_support: float):
 
-        for i in range(self.kernel_width):
-            for j in range(self.kernel_width):
-                x = (i - self.kernel_radius) / (self.kernel_radius * func_support)
-                y = (j - self.kernel_radius) / (self.kernel_radius * func_support)
-                tstud = 1.0 / (1.0 + x * x + y * y)
-                off = (j * self.kernel_width + i) * 4
-                self.TSNEKernel[i, j, 0] = tstud
-                self.TSNEKernel[i, j, 1] = tstud * tstud * x
-                self.TSNEKernel[i, j, 2] = tstud * tstud * y
-                self.TSNEKernel[i, j, 3] = 0
+    #     for i in range(self.kernel_width):
+    #         for j in range(self.kernel_width):
+    #             x = (i - self.kernel_radius) / (self.kernel_radius * func_support)
+    #             y = (j - self.kernel_radius) / (self.kernel_radius * func_support)
+    #             tstud = 1.0 / (1.0 + x * x + y * y)
+    #             off = (j * self.kernel_width + i) * 4
+    #             self.TSNEKernel[i, j, 0] = tstud
+    #             self.TSNEKernel[i, j, 1] = tstud * tstud * x
+    #             self.TSNEKernel[i, j, 2] = tstud * tstud * y
+    #             self.TSNEKernel[i, j, 3] = 0
 
     def compute(
         self,
@@ -236,16 +237,12 @@ class InterpolationShader:
         sum_out = persistent_tensors.get_tensor(ShaderBuffers.SUM_Q)
 
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
-        bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
+        bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
         fields_in = mgr.tensor(np.reshape(fields, (height * width, 4)))
 
-        params = [points_in, fields_in, interp_fields_out, sum_out]
-        print(f"Width height: {width} : {height}")
+        params = [points_in, fields_in, interp_fields_out, sum_out, bounds_in]
+        print(f"Width: {width}  height : {height}")
         push_constants = [
-            float(bounds[0]),
-            float(bounds[1]),
-            float(bounds[2]),
-            float(bounds[3]),
             float(width),
             float(height),
             float(num_points),
@@ -302,9 +299,9 @@ class ForcesShader:
         sumq_data = persistent_tensors.get_tensor_data(ShaderBuffers.SUM_Q)
 
         push_constants = [
-            num_points,
             exaggeration,
             sumq_data[0],
+            num_points,
         ]
 
         grid_size = int(math.sqrt(num_points) + 1)
@@ -352,7 +349,6 @@ class UpdateShader:
         params = [points_in, gradients_in, prev_gradients_in, gain_in]
 
         push_constants = [
-            float(num_points),
             float(eta),
             float(minimum_gain),
             float(iteration),
@@ -360,18 +356,20 @@ class UpdateShader:
             float(momentum),
             float(momentum_final),
             float(gain_multiplier),
+            num_points,
         ]
-
+        num_workgroups = int(num_points * 2 / 64) + 1
+        grid_size = int(math.sqrt(num_workgroups) + 1)
         algorithm = mgr.algorithm(
             tensors=params,  # The stencil_tensor is the only output parameter
             spirv=self.shader_code.spv,
-            workgroup=[1, 1, 1],  # Global dispatch 1 thread per pixel
+            workgroup=[grid_size, grid_size, 1],  # Global dispatch 1 thread per pixel
             push_consts=push_constants,
         )
         seq = mgr.sequence()
         seq.record(kp.OpSyncDevice(params))
         seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([points_in]))
+        seq.record(kp.OpSyncLocal([points_in, prev_gradients_in, gain_in]))
         seq.eval()
 
         updated_points = points_in.data()
@@ -392,8 +390,9 @@ class CenterScaleShader:
     ):
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
+        debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
 
-        params = [points_in, bounds_in]
+        params = [points_in, bounds_in, debug]
         if exaggeration > 1.2:
             scale = 1.0
             diameter = 0.1
@@ -401,12 +400,13 @@ class CenterScaleShader:
             scale = 0.0
             diameter = 0.0
 
+        print(f"Center/scale scale: {scale} diameter: {diameter}")
         push_constants = [
             float(num_points),
             float(scale),
             float(diameter),
         ]
-        num_workgroups = (num_points / 128) + 1
+        num_workgroups = int(num_points / 128) + 1
         grid_size = int(math.sqrt(num_workgroups)) + 1
 
         algorithm = mgr.algorithm(
@@ -418,8 +418,12 @@ class CenterScaleShader:
         seq = mgr.sequence()
         seq.record(kp.OpSyncDevice(params))
         seq.record(kp.OpAlgoDispatch(algorithm))
-        seq.record(kp.OpSyncLocal([points_in]))
+        seq.record(kp.OpSyncLocal([points_in, debug]))
         seq.eval()
-
-        updated_points = points_in.data()
+        dbg_np = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
+        updated_points = np.reshape(points_in.data(), (num_points, 2))
+        print(
+            f"Update max: {np.max(updated_points, axis=0)} min:"
+            f" {np.min(updated_points, axis=0)}"
+        )
         # print(f"Updated points after center and scale: {updated_points}")
