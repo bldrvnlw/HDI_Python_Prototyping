@@ -8,6 +8,7 @@ from shaders.shader import (
     CenterScaleShader,
 )
 import sys
+import math
 import numpy as np
 from kp import Manager
 from prob_utils import (
@@ -25,7 +26,13 @@ from shaders.persistent_tensors import (
 from sklearn.datasets import make_classification
 from sklearn import datasets
 
-X, y = datasets.load_digits(return_X_y=True)
+# X, y = datasets.load_digits(return_X_y=True)
+mnist = datasets.fetch_openml("mnist_784", version=1)
+X_dataframe, y_series = mnist["data"], mnist["target"]
+# test with a subset
+X = X_dataframe.to_numpy()[0:5000]
+y = y_series.to_numpy()[0:5000]
+print(f"MNIST: data shape {X.shape} labels shape {y.shape}")
 import matplotlib.pyplot as plt
 
 # a number of points for the test
@@ -73,7 +80,7 @@ nn = perplexity * perplexity_multiplier + 1
 
 distances, neighbours, indices = compute_annoy_probabilities(
     data=X,
-    num_trees=4,
+    num_trees=int(math.sqrt(num_points)),
     nn=nn,
 )
 
@@ -124,6 +131,9 @@ end_exaggeration = 1.0
 decay_start = 250
 decay_length = 100
 
+plt.figure(0)
+plt.scatter(points[:, 0], points[:, 1], c=colors, alpha=0.7)
+
 print("Starting GPU iterations")
 for i in range(num_iterations):
     exaggeration = start_exaggeration
@@ -134,7 +144,11 @@ for i in range(num_iterations):
         )
     elif i > decay_start + decay_length:
         exaggeration = 1
-    print(f"iteration number: {i}")
+    if exaggeration <= 1.2:
+        print("Breaking for low exaggeration")
+        break
+    print("**********************************************************")
+    print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
     bounds = bounds_shader.compute(
         mgr=mgr,
         num_points=num_points,
@@ -149,10 +163,13 @@ for i in range(num_iterations):
     range_x = bounds[1][0] - bounds[0][0]
     range_y = bounds[1][1] - bounds[0][1]
 
-    width = RESOLUTION_SCALING * int(max(range_x, MINIMUM_FIELDS_SIZE))
-    height = RESOLUTION_SCALING * int(max(range_y, MINIMUM_FIELDS_SIZE))
+    # assume adaptive resolution (scales with points range) with a minimum size
+    width = int(max(RESOLUTION_SCALING * range_x, MINIMUM_FIELDS_SIZE))
+    height = int(max(RESOLUTION_SCALING * range_y, MINIMUM_FIELDS_SIZE))
 
-    print(f"Width {width} Height {height}")
+    # This width and height is used for the size of the point "plot"
+
+    print(f"Bounds range + resolution scaling: Width {width} Height {height}")
     stencil = stencil_shader.compute(
         mgr=mgr,
         width=width,
@@ -183,6 +200,8 @@ for i in range(num_iterations):
     )
 
     if interpolation_shader.sumQ[0] == 0:
+        print("!!!! Breaking out due to interpolation sum 0 !!!!")
+        plt.show()
         break
 
     forces_shader.compute(
@@ -214,7 +233,11 @@ for i in range(num_iterations):
         persistent_tensors=persistent_tensors,
     )
     updated_bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
-    print(f"New bounds {updated_bounds}")
+    print(f"Updated bounds after point move {updated_bounds}")
+    if exaggeration <= 1.2:
+        print("Breaking for low exaggeration")
+        plt.show()
+        break
     centerscale_shader.compute(
         mgr=mgr,
         num_points=num_points,
@@ -222,18 +245,20 @@ for i in range(num_iterations):
         persistent_tensors=persistent_tensors,
     )
     # get the updated points
-    points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
+    points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION).reshape(
+        num_points, 2
+    )
     # print(f"Centered points {updated_points}")
+
+    xy = points.reshape(num_points, 2)
+    plt.figure(i + 1)
+    plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+
 
 points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
 xy = points.reshape(num_points, 2)
-print(f"xy.shape {xy.shape} xy : {xy}")
-mgr.destroy()
-plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+print(f"xy.shape {xy.shape}")
+# mgr.destroy()
+# plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
 plt.show()
 print("Iterations complete")
-
-# stencil = stencil.reshape(height, width, 4)  # colours
-
-# np.set_printoptions(threshold=sys.maxsize)
-# print(f"Stencil {stencil}")
