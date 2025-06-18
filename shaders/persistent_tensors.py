@@ -23,6 +23,7 @@ class ShaderBuffers(IntEnum):
     PREV_GRADIENTS = (7,)  # float: num_points x 2 (previous gradients)
     GAIN = (8,)  # float: num_points x 2 (gain)
     BOUNDS = (9,)  # float: 1 x 4 (min, max)
+    POS_DEBUG = (10,)  # for retrieving debug info
 
 
 class LinearProbabilityMatrix:
@@ -123,6 +124,9 @@ class PersistentTensors:
             ),
             ShaderBuffers.BOUNDS: self.mgr.tensor(
                 np.zeros((1, 4), dtype=np.float32)  # min and max bounds
+            ),
+            ShaderBuffers.POS_DEBUG: self.mgr.tensor(
+                np.zeros((self.num_points, 2), dtype=np.float32)
             ),
         }
 
