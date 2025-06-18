@@ -116,7 +116,9 @@ def binary_search_perplexity_numba(D_trunc, target_entropy, tol=1e-5, max_iter=5
         beta_max = np.inf
         beta = 1.0
 
-        Di = D_trunc[i]
+        Di = D_trunc[
+            i
+        ]  # distance from this point to defined neighbours (self already excluded)
         H, thisP = _h_beta_numba(Di, beta)
 
         iter_count = 0
@@ -229,13 +231,15 @@ def compute_annoy_probabilities(
             np.int32(i), nn + 1, include_distances=True
         )
         neighbours[i] = neighbours_i[1:]
+        if len(neighbours_i) < nn + 1:
+            raise Exception(f"Too few neighbours {len(neighbours_i)} ")
         distances[i] = distances_i[1:]  # Append distances excluding the query point
         indices[i] = [i * nn, nn]  # offset size
 
     # Parallel processing to speed up the nearest neighbor search
 
     num_jobs = cpu_count()
-    Parallel(n_jobs=10, require="sharedmem", prefer="threads")(
+    Parallel(n_jobs=num_jobs, require="sharedmem", prefer="threads")(
         delayed(getnns)(i) for i in range(num_points)
     )
 
