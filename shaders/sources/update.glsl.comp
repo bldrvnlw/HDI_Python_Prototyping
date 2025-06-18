@@ -6,7 +6,6 @@
   layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
   layout(push_constant) uniform FieldPushConstants {
-    float num_points; // Number of points in the layout
     float eta;        // Learning rate
     float minGain;   // Minimum gain value
     float iter;      // Current iteration number
@@ -14,13 +13,14 @@
     float mom;       // Initial momentum value
     float final_mom; // Final momentum value
     float mult;      // Multiplier for position update
+    uint  num_points; // Number of points in the layout
   } pc;
 
   void main() {
     uint workGroupID = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
     uint i = workGroupID * gl_WorkGroupSize.x + gl_LocalInvocationID.x;
-  uint num_points = uint(pc.num_points);
-    if (i >= num_points * 2)
+    //uint num_points = uint(pc.num_points);
+    if (i >= pc.num_points * 2)
       return;
 
     float grad = Gradients[i];

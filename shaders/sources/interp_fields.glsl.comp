@@ -1,19 +1,15 @@
   #version 430
-  layout(std430, binding = 0) readonly buffer PosBuf{ vec2 Points[]; };
+  layout(std430, binding = 0) readonly buffer PosBuf{ vec2 Positions[]; };
   layout(std430, binding = 1) readonly buffer FieldsBuf { vec4 Fields[]; };  // packed RGBA float pixels
   layout(std430, binding = 2) writeonly buffer ValBuf { vec4 Values[]; };
   layout(std430, binding = 3) writeonly buffer SumBuf { float Sum[]; };
+  layout(std430, binding = 4) buffer BoundsInterface { vec2 Bounds[]; };
 
   layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 
   shared float reduction_array[64];
 
-  //uniform sampler2D fields;
-  //uniform uint num_points;
-
   layout(push_constant) uniform FieldPushConstants {
-    vec2 rect_min; // min bounds of the points rectangle
-    vec2 rect_max; // max bounds of the points rectangle
     vec2 imageSize;
     float num_points;
   } pc;
@@ -30,13 +26,13 @@ vec4 sampleLinearField(vec2 uv) {
     float y = uv.y * int(pc.imageSize.y) - 0.5;
     vec2 fCoord = vec2(x, y);
 
-    int x0 = int(floor(fCoord.x));
+    int x0 = int(floor(x));
     int x1 = x0 + 1;
-    int y0 = int(floor(fCoord.y));
+    int y0 = int(floor(y));
     int y1 = y0 + 1;
 
-    float fx = fract(fCoord.x);
-    float fy = fract(fCoord.y);
+    float fx = fract(x);
+    float fy = fract(y);
 
     vec4 c00 = texel(x0, y0);
     vec4 c10 = texel(x1, y0);
@@ -44,34 +40,33 @@ vec4 sampleLinearField(vec2 uv) {
     vec4 c11 = texel(x1, y1);
 
     // Bilinear interpolation
-    vec4 a = mix(c00, c10, fx);
-    vec4 b = mix(c01, c11, fx);
-    return mix(a, b, fy);
-    //return vec4(fCoord, 0, 0); // Fallback in case of invalid UVs
-    //return vec4(2.0); // Fallback in case of invalid UVs
+    vec4 my0 = mix(c00, c10, fx); // fractional mix in x directon y=0
+    vec4 my1 = mix(c01, c11, fx); // fractional mix in x directon y=1
+    return mix(my0, my1, fy);
 }
 
   void main() {
     uint lid = gl_LocalInvocationIndex.x;
     uint groupSize = gl_WorkGroupSize.x;
+    vec2 min_bounds = Bounds[0];
+    vec2 max_bounds = Bounds[1];
 
-    vec2 range = pc.rect_max - pc.rect_min;
-    //vec2 inv_range = 1.0 / range;
+    vec2 range = max_bounds - min_bounds;
+    vec2 inv_range = 1.0 / range;
 
     float sum_Q = 0;
     uint num_points = uint(pc.num_points);
     for (uint i = lid; i < num_points; i += groupSize)
     {
-      // Position of point in range 0 to 1
-      vec2 point = (Points[i] - pc.rect_min) / range;
+      // Normalized position of point in range 0 to 1
+      vec2 norm = (Positions[i] - min_bounds) / range;
 
       // Bilinearly sample the input texture
       //vec4 v = texture(Fields, point);
-      vec4 v = sampleLinearField(point);
+      vec4 v = sampleLinearField(norm);
       sum_Q += max(v.x - 1, 0.0);
       Values[i] = v;
     }
-    Sum[0] = sum_Q;
   
     // Reduce add sum_Q to a single value
     //uint reduction_size = 64;
@@ -79,37 +74,30 @@ vec4 sampleLinearField(vec2 uv) {
       reduction_array[lid - 64] = sum_Q;
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 64) {
       reduction_array[lid] += sum_Q;
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 32) {
       reduction_array[lid] += reduction_array[lid + 32];
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 16) {
       reduction_array[lid] += reduction_array[lid + 16];
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 8) {
       reduction_array[lid] += reduction_array[lid + 8];
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 4) {
       reduction_array[lid] += reduction_array[lid + 4];
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 2) {
       reduction_array[lid] += reduction_array[lid + 2];
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 1) {
       Sum[0] = reduction_array[0] + reduction_array[1];
     }

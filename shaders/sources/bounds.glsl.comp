@@ -41,43 +41,36 @@
     // Barrier synchronize the threads in the work group
     // and parallel reduce the min and max values in shared memory 
     barrier();
-    memoryBarrierShared();
     if (lid < 64) {
       min_reduction[lid] = min(minBound, min_reduction[lid]);
       max_reduction[lid] = max(maxBound, max_reduction[lid]);
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 32) {
       min_reduction[lid] = min(min_reduction[lid], min_reduction[lid + 32]);
       max_reduction[lid] = max(max_reduction[lid], max_reduction[lid + 32]);
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 16) {
       min_reduction[lid] = min(min_reduction[lid], min_reduction[lid + 16]);
       max_reduction[lid] = max(max_reduction[lid], max_reduction[lid + 16]);
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 8) {
       min_reduction[lid] = min(min_reduction[lid], min_reduction[lid + 8]);
       max_reduction[lid] = max(max_reduction[lid], max_reduction[lid + 8]);
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 4) {
       min_reduction[lid] = min(min_reduction[lid], min_reduction[lid + 4]);
       max_reduction[lid] = max(max_reduction[lid], max_reduction[lid + 4]);
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 2) {
       min_reduction[lid] = min(min_reduction[lid], min_reduction[lid + 2]);
       max_reduction[lid] = max(max_reduction[lid], max_reduction[lid + 2]);
     }
     barrier();
-    memoryBarrierShared();
     if (lid == 0) {
       minBound = min(min_reduction[0], min_reduction[1]);
       maxBound = max(max_reduction[0], max_reduction[1]);

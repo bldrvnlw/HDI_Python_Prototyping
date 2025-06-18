@@ -14,9 +14,10 @@
   //layout(rg32f) uniform image2D point_tex;
 
   layout (push_constant) uniform ForcesPushConstants {
-    float f_num_points; 
+    //float f_num_points; 
     float exaggeration;
     float sum_Q; 
+    uint num_points;
   } pc;
 
 
@@ -26,10 +27,10 @@
     uint groupSize = gl_WorkGroupSize.x;
     uint lid = gl_LocalInvocationID.x;
 
-    float inv_num_points = 1.0 / float(pc.f_num_points);
+    float inv_num_points = 1.0 / float(pc.num_points);
     float inv_sum_Q = 1.0 / pc.sum_Q;
-    uint num_points = uint(pc.f_num_points);
-    if (i >= num_points)
+    //uint num_points = uint(pc.f_num_points);
+    if (i >= pc.num_points)
       return;
 
     // Get the point coordinates
@@ -38,11 +39,11 @@
     //computing positive forces
     vec2 sum_positive = vec2(0);
 
-    uint index = Indices[2*i];
-    uint size = Indices[2*i + 1];
+    uint index = Indices[2*i]; // offset to start of nn list - in Neighbours
+    uint size = Indices[2*i + 1]; // length of nn list
 
     vec2 positive_force = vec2(0);
-    uint n_index;
+    // for all the (size) nearest neighbours
     for (uint j = lid; j < size; j += group_size) {
       // Get other point coordinates
       vec2 point_j = Positions[Neighbours[index + j]];
@@ -63,7 +64,6 @@
       sum_positive_red[lid - 32] = positive_force;
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 32) {
       sum_positive_red[lid] += positive_force;
     }
@@ -75,7 +75,6 @@
       }
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 1) {
       sum_positive = sum_positive_red[0] + sum_positive_red[1];
 

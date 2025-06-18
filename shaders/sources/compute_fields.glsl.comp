@@ -58,28 +58,24 @@
       value.xyz += vec3(tstud, tstud2*t.x, tstud2*t.y);
 
     }
-    //imageStore(Fields, ivec2(x, y), vec4(value));
-    
+      
     // Initialize the reduction array with the values from the last thread
     // then reduce the static and vector values in parallel for this pixel 
     if (lid >= hgSize) {
       reduction_array[lid - hgSize] = value.xyz;
     }
     barrier();
-    memoryBarrierShared();
     if (lid < hgSize) {
       reduction_array[lid] += value.xyz;
     }
     for (uint reduceSize = hgSize/2; reduceSize > 1; reduceSize /= 2)
     {
       barrier();
-      memoryBarrierShared();
       if (lid < reduceSize) {
         reduction_array[lid] += reduction_array[lid + reduceSize];
       }
     }
     barrier();
-    memoryBarrierShared();
     if (lid < 1) {
       imageStore(Fields, ivec2(x, y), vec4(reduction_array[0] + reduction_array[1], 0));
     } 
