@@ -3,7 +3,7 @@
   layout(std430, binding = 1) readonly buffer FieldsBuf { vec4 Fields[]; };  // packed RGBA float pixels
   layout(std430, binding = 2) writeonly buffer ValBuf { vec4 Values[]; };
   layout(std430, binding = 3) writeonly buffer SumBuf { float Sum[]; };
-  layout(std430, binding = 4) buffer BoundsInterface { vec2 Bounds[]; };
+  layout(std430, binding = 4) readonly buffer BoundsInterface { vec2 Bounds[]; };
   layout(std430, binding = 5) readonly buffer NumPoints { uint NP[]; };
 
   layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
@@ -15,15 +15,15 @@
   } pc;
 
   vec4 texel(int x, int y) {
-    x = clamp(x, 0, int(pc.imageSize.x) - 1);
-    y = clamp(y, 0, int(pc.imageSize.y) - 1);
-    return Fields[y * int(pc.imageSize.x) + x];
+    x = clamp(x, 0, int(round(pc.imageSize.x)) - 1);
+    y = clamp(y, 0, int(round(pc.imageSize.y)) - 1);
+    return Fields[y * int(round(pc.imageSize.x)) + x];
 }
 
 vec4 sampleLinearField(vec2 uv) {
     // Convert normalized uv (0–1) to (0, size-1) field coords
-    float x = uv.x * int(pc.imageSize.x) - 0.5;
-    float y = uv.y * int(pc.imageSize.y) - 0.5;
+    float x = uv.x * int(round(pc.imageSize.x)) - 0.5;
+    float y = uv.y * int(round(pc.imageSize.y)) - 0.5;
     vec2 fCoord = vec2(x, y);
 
     int x0 = int(floor(x));
