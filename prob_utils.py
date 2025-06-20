@@ -183,8 +183,7 @@ def compute_perplexity_probs_numba(D, perplexity=30.0, tol=1e-5, max_iter=200):
     return binary_search_perplexity_numba(D, target_entropy, tol, max_iter)
 
 
-def symmetrize_sparse_probs(P_cond, neighbors, N, nn):
-    rows, cols, data = [], [], []
+def symmetrize_probs(P_cond, neighbors, N, nn):
 
     P_sym = P_cond.copy()
     for i in range(N):
@@ -202,23 +201,14 @@ def symmetrize_sparse_probs(P_cond, neighbors, N, nn):
                     pji = P_cond[j, rev_idx]
                     pij_sym = (pij + pji) / 2
                 else:
-                    pij_sym = pij
+                    pij_sym = pij / 2
             except IndexError:
                 pij_sym = pij
             P_sym[i, k] = pij_sym
             if rev_idx > -1:
                 P_sym[j, rev_idx] = pij_sym
 
-    # repack in coo matrix
-    for i in range(N):
-        for k in range(nn):
-            j = neighbors[i, k]
-            pij_sym = P_sym[i, k]
-            rows.append(i)
-            cols.append(j)
-            data.append(pij_sym)
-
-    return coo_matrix((data, (rows, cols)), shape=(N, N))
+    return P_sym
 
 
 def symmetrize_P(P_cond):
