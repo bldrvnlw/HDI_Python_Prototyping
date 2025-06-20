@@ -38,17 +38,7 @@ def _h_beta(D_row, beta):
     return H, P
 
 
-# alternative with numba
-@njit
-def _h_beta_numba(D_row, beta):
-    P = np.exp(-D_row * beta)
-    sumP = np.sum(P)
-    P = P / (sumP + 1e-10)
-    H = -np.sum(P * np.log(P + 1e-10))
-    return H, P
-
-
-def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=50):
+def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=200):
     """
     Compute the conditional probabilities for a given distance matrix D
     using a binary search to find the correct sigma for each point.
@@ -80,7 +70,7 @@ def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=50):
         Di = D[
             i
         ]  # distance from this point to defined neighbours (self already excluded)
-        H, thisP = _h_beta(Di, beta)
+        H, thisP = _h_beta(Di, beta, P)
 
         # Binary search for correct beta
         iter_count = 0
@@ -105,26 +95,68 @@ def compute_perplexity_probs(D, perplexity=30.0, tol=1e-5, max_iter=50):
     return P, sigmas
 
 
+# reference https://nicola17.github.io/publications/2016_AtSNE.pdf (section 3 tSNE) for the math in original form
+
+
 # alternative with numba
+# Taking the log of the perplexity (called target_entropy or H here) we have
+# https://latex.codecogs.com/gif.latex?log_2(\mu)=-\sum_{j}^{N}p_{j|i}%20log_2(p_{j|i})
+
+
 @njit
-def binary_search_perplexity_numba(D_trunc, target_entropy, tol=1e-5, max_iter=50):
-    N, nn = D_trunc.shape
+def _h_beta_numba(D_i, beta_i):
+    """_summary_
+        Compute Gaussian kernel row
+    Args:
+        D_i (nd.array[np.float32]): all the neighbour distances squared for a point i
+        beta_i (float): current 1/(2*sigma^2) estimate for row i
+
+    Returns:
+        tuple(float, nd.array[np.float32]): estimated total_entropy i.e. log(perplexity) and distribution
+    """
+    # Calculate the gaussian value array for each neighbour of point i
+    # https://latex.codecogs.com/gif.latex?\exp(-(||x_i-x_j||^2)/(2\sigma^2_i))
+    Gi = np.exp(-D_i * beta_i)
+    # sum the gaussians on the current point
+    # https://latex.codecogs.com/gif.latex?\sum_{k&space;\neq&space;i}^{N}\exp(-(||x_i-x_j||^2)/(2\sigma^2_i))
+    sum_Gi = np.sum(Gi)
+    Pji = Gi / (sum_Gi + 1e-10)  # calculate the probability similarity distribution
+    H = -np.sum(Pji * np.log(Pji + 1e-10))  # estimate of log(target_perplexity)
+    return H, Pji
+
+
+# Implement with numba
+#
+# Iteratively search or a value of sigma that givea a p_j|i distribution such that
+# https://latex.codecogs.com/gif.latex?\mu=2^{-\sum_{j}^{N}p_{j|i}%20log_2(p_{j|i})}
+# where \mu is the perplexity
+# log(\mu) is denoted by H a.k.a. target_entropy
+#
+# In practice we look for beta defined as 1/(2*sigma^2) and
+# the comparison is performed with a tolerance
+
+
+@njit
+def binary_search_perplexity_numba(D, target_entropy, tol=1e-5, max_iter=200):
+    N, nn = D.shape
     P = np.zeros((N, nn))
     sigmas = np.ones(N)
 
-    for i in range(N):
+    for i in range(N):  # create the distribution on a point by point basis
         beta_min = -np.inf
         beta_max = np.inf
         beta = 1.0
 
-        Di = D_trunc[
-            i
-        ]  # distance from this point to defined neighbours (self already excluded)
-        H, thisP = _h_beta_numba(Di, beta)
+        # Calculate the log(perplexity) - H_est
+        # and the corresponding probability array - P_est
+        # for the current point distances - D[i]
+        # given an estimated beta value
+        H_est, P_est = _h_beta_numba(D[i], beta)
 
         iter_count = 0
-        while np.abs(H - target_entropy) > tol and iter_count < max_iter:
-            if H > target_entropy:
+        # Is H_est withing the tolerance bounds or should we continue iterating
+        while np.abs(H_est - target_entropy) > tol and iter_count < max_iter:
+            if H_est > target_entropy:
                 beta_min = beta
                 if beta_max == np.inf:
                     beta *= 2.0
@@ -137,16 +169,16 @@ def binary_search_perplexity_numba(D_trunc, target_entropy, tol=1e-5, max_iter=5
                 else:
                     beta = (beta + beta_min) / 2.0
 
-            H, thisP = _h_beta_numba(Di, beta)
+            H_est, P_est = _h_beta_numba(D[i], beta)
             iter_count += 1
 
-        P[i] = thisP
+        P[i] = P_est
         sigmas[i] = np.sqrt(1 / (2 * beta))
 
     return P, sigmas
 
 
-def compute_perplexity_probs_numba(D, perplexity=30.0, tol=1e-5, max_iter=50):
+def compute_perplexity_probs_numba(D, perplexity=30.0, tol=1e-5, max_iter=200):
     target_entropy = np.log(perplexity)
     return binary_search_perplexity_numba(D, target_entropy, tol, max_iter)
 
@@ -154,22 +186,34 @@ def compute_perplexity_probs_numba(D, perplexity=30.0, tol=1e-5, max_iter=50):
 def symmetrize_sparse_probs(P_cond, neighbors, N, nn):
     rows, cols, data = [], [], []
 
+    P_sym = P_cond.copy()
     for i in range(N):
         for k in range(nn):
-            j = neighbors[i * nn + k]
+            j = neighbors[i, k]
             pij = P_cond[i, k]
 
             # Check if j also has i in its neighbor list
+            rev_idx = -1
+            pij_sym = 0
             try:
-                rev_idx = np.where(neighbors[j] == i)[0]
-                if rev_idx.size > 0:
-                    pji = P_cond[j, rev_idx[0]]
-                    pij_sym = (pij + pji) / (2 * N)
+                match_idxs = np.where(neighbors[j, :] == i)[0]
+                if match_idxs.size > 0:
+                    rev_idx = match_idxs[0]
+                    pji = P_cond[j, rev_idx]
+                    pij_sym = (pij + pji) / 2
                 else:
-                    pij_sym = pij / (2 * N)
+                    pij_sym = pij
             except IndexError:
-                pij_sym = pij / (2 * N)
+                pij_sym = pij
+            P_sym[i, k] = pij_sym
+            if rev_idx > -1:
+                P_sym[j, rev_idx] = pij_sym
 
+    # repack in coo matrix
+    for i in range(N):
+        for k in range(nn):
+            j = neighbors[i, k]
+            pij_sym = P_sym[i, k]
             rows.append(i)
             cols.append(j)
             data.append(pij_sym)
@@ -179,7 +223,7 @@ def symmetrize_sparse_probs(P_cond, neighbors, N, nn):
 
 def symmetrize_P(P_cond):
     N = P_cond.shape[0]
-    P = (P_cond + P_cond.T) / (2.0 * N)
+    P = (P_cond + P_cond.T) / 2.0
     return P
 
 
@@ -190,7 +234,7 @@ def compute_annoy_probabilities(
 ) -> Tuple[np.ndarray[np.float32], np.ndarray[np.uint32], np.ndarray[np.int32]]:
     """
     Compute the probabilities using Annoy for nearest neighbors (euclidean metric).
-    Inspired by CoPilot and https://github.com/astrogilda/openTSNE
+    Inspired by CoPilot and https://github.com/pavlin-policar/openTSNE
 
     Args:
         data (np.ndarray): Input data points.
@@ -244,10 +288,11 @@ def compute_annoy_probabilities(
         delayed(getnns)(i) for i in range(num_points)
     )
 
+    distances = np.power(distances, 2)
     return (
-        np.ascontiguousarray(distances),
-        np.ascontiguousarray(neighbours.reshape(num_points * nn)),
-        np.ascontiguousarray(indices.reshape(num_points * 2)),
+        distances,
+        neighbours,
+        indices,
     )
 
 

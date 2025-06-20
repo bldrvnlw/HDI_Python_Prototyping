@@ -26,47 +26,9 @@ from shaders.persistent_tensors import (
     PersistentTensors,
     ShaderBuffers,
 )
-from sklearn.datasets import make_classification
-from sklearn import datasets
 
-# X, y = datasets.load_digits(return_X_y=True)
-mnist = datasets.fetch_openml("mnist_784", version=1)
-X_dataframe, y_series = mnist["data"], mnist["target"]
-# test with a subset
-X = X_dataframe.to_numpy()[0:5000]
-y = y_series.to_numpy()[0:5000]
-print(f"MNIST: data shape {X.shape} labels shape {y.shape}")
+from data_sources import get_generated, get_MNIST
 import matplotlib.pyplot as plt
-import matrix_viewer
-
-# a number of points for the test
-# num_points = 2**16
-num_points = X.shape[0]
-
-
-def label_to_colors(labels, cmap="tab10"):
-    unique_labels = np.unique(labels)
-    colormap = plt.get_cmap(cmap)
-    label_to_color = {
-        label: colormap(i / len(unique_labels)) for i, label in enumerate(unique_labels)
-    }
-    return [label_to_color[label] for label in labels]
-
-
-# Generate some random clustered data
-# X, y = make_classification(
-#    n_features=1000,
-#    n_classes=10,
-#    n_samples=num_points,
-#    n_informative=4,
-#    random_state=5,
-#    n_clusters_per_class=1,
-# )
-
-colors = label_to_colors(y)
-
-# randomly initialize the embedding
-points = get_random_uniform_circular_embedding(num_points, 0.1)
 
 bounds_shader = BoundsShader()
 stencil_shader = StencilShader()
@@ -77,52 +39,54 @@ update_shader = UpdateShader()
 centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
 
-
+num_points = 20000
 perplexity = 30
-# perplexity_multiplier = 3
-# nn = perplexity * perplexity_multiplier + 1
+perplexity_multiplier = 3
+nn = perplexity * perplexity_multiplier + 1
 
-# distances, neighbours, indices = compute_annoy_probabilities(
-#    data=X,
-#    num_trees=int(math.sqrt(num_points)),
-#    nn=nn,
-##)
+X, y, colors = get_MNIST(num_points=num_points)
+
+# randomly initialize the embedding
+points = get_random_uniform_circular_embedding(num_points, 0.1)
+
+distances, neighbours, indices = compute_annoy_probabilities(
+    data=X,
+    num_trees=int(math.sqrt(num_points)),
+    nn=nn,
+)
 
 # print(f"dist {distances.shape} distances {distances}")
 # print(f"indices {indices.shape} indices {indices}")
 # print(f"neigh {neighbours.shape} neighbours {neighbours}")
 
-# D = euclidian_sqrdistance_matrix(points)
 # Compute the perplexity probabilities
-# P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
-# sparse_probs = symmetrize_sparse_probs(P, neighbours, num_points, nn)
-# P_s = symmetrize_P(P)
-# P_s = P  # skip symmetrization for now
+P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
+sparse_probs = symmetrize_sparse_probs(P, neighbours, num_points, nn)
 
 # print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
-# print(f"Perplexity matrix {P}")
-# print(f"sigmas {sigmas}")
 
-neighbours, probabilities, indices = getProbabilitiesOpenTSNE(X, perplexity=perplexity)
-# Create a manager for the shaders
-# and persistent buffers
-mgr = Manager()
-
-prob_matrix = LinearProbabilityMatrix(
+prob_matrix = LinearProbabilityMatrix.from_sparse_probs(
     neighbours=neighbours,
-    probabilities=probabilities,
+    sparse_probabilities=sparse_probs,
     indices=indices,
+    num_points=num_points,
+    nn=nn,
 )
 
-# prob_matrix = LinearProbabilityMatrix.from_sparse_probs(
+# Or Using OpenTSNE
+# neighbours, probabilities, indices = getProbabilitiesOpenTSNE(X, perplexity=perplexity)
+# Create a manager for the shaders
+# and persistent buffers
+
+
+# prob_matrix = LinearProbabilityMatrix(
 #    neighbours=neighbours,
-#    sparse_probabilities=sparse_probs,
+#    probabilities=probabilities,
 #    indices=indices,
-#    num_points=num_points,
-#    nn=nn,
 # )
 
 
+mgr = Manager()
 # Create the persistent buffers
 persistent_tensors = PersistentTensors(
     mgr=mgr, num_points=num_points, prob_matrix=prob_matrix
@@ -134,7 +98,7 @@ num_iterations = 1000
 start_exaggeration = 4.0  # should decay at a certain point
 end_exaggeration = 1.0
 decay_start = 250
-decay_length = 100
+decay_length = 200
 
 # plt.figure(0)
 # plt.scatter(points[:, 0], points[:, 1], c=colors, alpha=0.7)

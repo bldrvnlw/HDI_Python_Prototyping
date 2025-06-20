@@ -102,6 +102,7 @@ class PersistentTensors:
     def __create_tensors(self):
         """
         Create all the tensor buffer with the specified sizes.
+        Note the use of tensor_t fro non float32 buffers
         """
         self.tensor_map = {
             ShaderBuffers.POSITION: self.mgr.tensor(
@@ -111,14 +112,14 @@ class PersistentTensors:
                 np.zeros((self.num_points, 4), dtype=np.float32)
             ),
             ShaderBuffers.SUM_Q: self.mgr.tensor(np.zeros((1,), dtype=np.float32)),
+            ShaderBuffers.GRADIENTS: self.mgr.tensor(
+                np.zeros((self.num_points, 2), dtype=np.float32)
+            ),
             ShaderBuffers.NEIGHBOUR: self.mgr.tensor_t(self.prob_matrix.neighbours),
             ShaderBuffers.PROBABILITIES: self.mgr.tensor(
                 self.prob_matrix.probabilities
             ),
             ShaderBuffers.INDEX: self.mgr.tensor_t(self.prob_matrix.indices),
-            ShaderBuffers.GRADIENTS: self.mgr.tensor(
-                np.zeros((self.num_points, 2), dtype=np.float32)
-            ),
             ShaderBuffers.PREV_GRADIENTS: self.mgr.tensor(
                 np.zeros((self.num_points, 2), dtype=np.float32)
             ),
@@ -126,7 +127,7 @@ class PersistentTensors:
                 np.ones((self.num_points, 2), dtype=np.float32)
             ),
             ShaderBuffers.BOUNDS: self.mgr.tensor(
-                np.zeros((1, 4), dtype=np.float32)  # min and max bounds
+                np.ones((1, 4), dtype=np.float32)  # min and max bounds
             ),
             ShaderBuffers.POS_DEBUG: self.mgr.tensor(
                 np.zeros((self.num_points, 2), dtype=np.float32)
