@@ -17,7 +17,7 @@ from prob_utils import (
     compute_annoy_probabilities,
     euclidian_sqrdistance_matrix,
     compute_perplexity_probs_numba,
-    symmetrize_sparse_probs,
+    symmetrize_probs,
     get_random_uniform_circular_embedding,
     getProbabilitiesOpenTSNE,
 )
@@ -29,6 +29,7 @@ from shaders.persistent_tensors import (
 
 from data_sources import get_generated, get_MNIST
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 bounds_shader = BoundsShader()
 stencil_shader = StencilShader()
@@ -44,7 +45,7 @@ perplexity = 30
 perplexity_multiplier = 3
 nn = perplexity * perplexity_multiplier + 1
 
-X, y, colors = get_MNIST(num_points=num_points)
+X, y, colors, unique_colors = get_MNIST(num_points=num_points)
 
 # randomly initialize the embedding
 points = get_random_uniform_circular_embedding(num_points, 0.1)
@@ -61,16 +62,14 @@ distances, neighbours, indices = compute_annoy_probabilities(
 
 # Compute the perplexity probabilities
 P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
-sparse_probs = symmetrize_sparse_probs(P, neighbours, num_points, nn)
+P_sym = symmetrize_probs(P, neighbours, num_points, nn)
 
 # print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
 
-prob_matrix = LinearProbabilityMatrix.from_sparse_probs(
-    neighbours=neighbours,
-    sparse_probabilities=sparse_probs,
+prob_matrix = LinearProbabilityMatrix(
+    neighbours=np.ravel(neighbours),
+    probabilities=np.ravel(P_sym),
     indices=indices,
-    num_points=num_points,
-    nn=nn,
 )
 
 # Or Using OpenTSNE
@@ -109,12 +108,11 @@ print("Starting GPU iterations")
 for i in range(num_iterations):
     exaggeration = start_exaggeration
     if i > decay_start and i < decay_start + decay_length:
-        exaggeration = start_exaggeration - (
-            (start_exaggeration - end_exaggeration)
-            * (float(i - decay_start) / float(decay_length))
-        )
-    elif i > decay_start + decay_length:
-        exaggeration = 1
+        decay_fraction = float(i - decay_start) / float(decay_length)
+        decay_range = start_exaggeration - end_exaggeration
+        exaggeration = start_exaggeration - (decay_fraction * decay_range)
+    elif i >= decay_start + decay_length:
+        exaggeration = 1.0
 
     print("**********************************************************")
     print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
@@ -232,6 +230,12 @@ xy = points.reshape(num_points, 2)
 print(f"xy.shape {xy.shape}")
 # mgr.destroy()
 plt.figure(i)
-plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+scatter = plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+custom = [
+    Line2D([], [], marker=".", markersize=10, color=unique_colors[i], linestyle="None")
+    for i in range(0, 10)
+]
+plt.legend(custom, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], loc="lower left", title="Digits")
 plt.show()
+mgr.destroy()
 print("Iterations complete")
