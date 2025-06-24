@@ -27,6 +27,8 @@ class Shader:
                 [
                     "glslangValidator",
                     "-V",
+                    "-S",
+                    "comp",
                     "-e",
                     "main",
                     "--target-env",
@@ -242,15 +244,15 @@ class InterpolationShader:
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
         num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
-        fields_in = mgr.tensor(np.reshape(fields, (height * width, 4)))
+        fieldimage_in = mgr.image(fields, width, height, 4)
 
         params = [
             points_in,
-            fields_in,
             interp_fields_out,
             sum_out,
             bounds_in,
             num_points_tensor,
+            fieldimage_in,
         ]
         print(f"Width: {width}  height : {height}")
         push_constants = [
