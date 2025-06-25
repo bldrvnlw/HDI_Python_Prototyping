@@ -37,7 +37,8 @@ def get_MNIST(num_points: int) -> Tuple[np.array, np.array, List[int]]:
     y = y_series.to_numpy()[0:num_points]
     print(f"MNIST: data shape {X.shape} labels shape {y.shape}")
     import matplotlib.pyplot as plt
-    import matrix_viewer
+
+    # import matrix_viewer
 
     colors, unique_colors = label_to_colors(y)
     return (X, y, colors, unique_colors)

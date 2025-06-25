@@ -12,7 +12,8 @@ import math
 import time
 import numpy as np
 from kp import Manager
-from openTSNE import affinity
+
+# from openTSNE import affinity
 from prob_utils import (
     compute_annoy_probabilities,
     euclidian_sqrdistance_matrix,
@@ -40,7 +41,7 @@ update_shader = UpdateShader()
 centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
 
-num_points = 20000
+num_points = 60000
 perplexity = 30
 perplexity_multiplier = 3
 nn = perplexity * perplexity_multiplier + 1
@@ -114,8 +115,8 @@ for i in range(num_iterations):
     elif i >= decay_start + decay_length:
         exaggeration = 1.0
 
-    print("**********************************************************")
-    print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
+    # print("**********************************************************")
+    # print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
     bounds = bounds_shader.compute(
         mgr=mgr,
         num_points=num_points,
@@ -123,7 +124,7 @@ for i in range(num_iterations):
         points=points,
         persistent_tensors=persistent_tensors,
     )
-    print(f"Bounds {bounds}")
+    # print(f"Bounds {bounds}")
 
     MINIMUM_FIELDS_SIZE = 5
     RESOLUTION_SCALING = 2
@@ -136,7 +137,7 @@ for i in range(num_iterations):
 
     # This width and height is used for the size of the point "plot"
 
-    print(f"Bounds range + resolution scaling: Width {width} Height {height}")
+    # print(f"Bounds range + resolution scaling: Width {width} Height {height}")
     stencil = stencil_shader.compute(
         mgr=mgr,
         width=width,
@@ -144,7 +145,7 @@ for i in range(num_iterations):
         num_points=num_points,
         persistent_tensors=persistent_tensors,
     )
-    print(f"Stencil shape {stencil.shape} dtype {stencil.dtype}")
+    # print(f"Stencil shape {stencil.shape} dtype {stencil.dtype}")
     # print(stencil)
     # matrix_viewer.view(stencil[..., 0])
     # matrix_viewer.show_with_pyplot()
@@ -157,7 +158,7 @@ for i in range(num_iterations):
         persistent_tensors=persistent_tensors,
     )
 
-    print(f"Fields shape {fields.shape} dtype {fields.dtype}")
+    # print(f"Fields shape {fields.shape} dtype {fields.dtype}")
 
     interpolation_shader.compute(
         mgr=mgr,
@@ -201,7 +202,7 @@ for i in range(num_iterations):
         persistent_tensors=persistent_tensors,
     )
     updated_bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
-    print(f"Updated bounds after point move {updated_bounds}")
+    # print(f"Updated bounds after point move {updated_bounds}")
     # if exaggeration <= 1.2:
     #    print("Breaking for low exaggeration")
     #    break
@@ -217,12 +218,12 @@ for i in range(num_iterations):
     )
     # print(f"Centered points {updated_points}")
 
-    xy = points.reshape(num_points, 2)
-    if (i - 1) % 50 == 0:
-        plt.figure(i)
-        plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
-        plt.show(block=False)
-        # time.sleep(0.5)
+    # xy = points.reshape(num_points, 2)
+    # if (i - 1) % 50 == 0:
+    #    plt.figure(i)
+    #    plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+    #    plt.show(block=False)
+    # time.sleep(0.5)
 
 
 points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)

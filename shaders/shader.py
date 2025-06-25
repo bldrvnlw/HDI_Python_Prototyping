@@ -112,13 +112,13 @@ class StencilShader:
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
 
-        print(f"bounds {bounds}")
+        # print(f"bounds {bounds}")
         np.set_printoptions(threshold=sys.maxsize)
         # print(f"Points  {points}")
         stencil_np_array = np.zeros((height, width, 4), dtype=np.uint8)
         stencil_out = mgr.image(stencil_np_array, width, height, 4)
         # print(f"Tensor points in shape: {points_in.size()}")
-        print(f"stencil size width: {width} height: {height}")
+        # print(f"stencil size width: {width} height: {height}")
         push_constants = [
             bounds[0],
             bounds[1],
@@ -154,10 +154,10 @@ class StencilShader:
         )
         debug = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
 
-        print(
-            f"Generated stencil shape: {generated_stencil.shape}  dtype:"
-            f" {generated_stencil.dtype}"
-        )
+        # print(
+        #    f"Generated stencil shape: {generated_stencil.shape}  dtype:"
+        #    f" {generated_stencil.dtype}"
+        # )
 
         # print(f"Stencil: {generated_stencil[..., 0]}")  # Print only the first channel
         # np.savetxt("stencil_output.txt", generated_stencil[..., 0], fmt="%i")
@@ -195,7 +195,7 @@ class FieldComputationShader:
         num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
         stencil_in = mgr.image(stencil, width, height, 4)
         params = [points_in, bounds_in, field_out, stencil_in, num_points_tensor]
-        print(f"Num points: {num_points}")
+        # print(f"Num points: {num_points}")
         push_constants = [float(width), float(height), self.func_support]
         algorithm = mgr.algorithm(
             tensors=params,  # The stencil_tensor is the only output parameter
@@ -214,11 +214,11 @@ class FieldComputationShader:
         seq.eval_async(kp.OpSyncLocal([field_out]))
         seq.eval_await()
 
-        print(f"Field shape {field_out.data().shape} ")
+        # print(f"Field shape {field_out.data().shape} ")
         generated_field = (
             np.array(field_out.data()).reshape(height, width, 4).astype(np.float32)
         )
-        np.savetxt("field_output.txt", generated_field[..., 1], fmt="%f")
+        # np.savetxt("field_output.txt", generated_field[..., 1], fmt="%f")
         # print(f"Field data {field_out.data()}")
         return generated_field
 
@@ -254,7 +254,7 @@ class InterpolationShader:
             num_points_tensor,
             fieldimage_in,
         ]
-        print(f"Width: {width}  height : {height}")
+        # print(f"Width: {width}  height : {height}")
         push_constants = [
             float(width),
             float(height),
@@ -281,7 +281,7 @@ class InterpolationShader:
         )
 
         self.sumQ = sum_out.data()
-        print(f"Interpolation Sum: {self.sumQ}")
+        # print(f"Interpolation Sum: {self.sumQ}")
 
 
 class ForcesShader:
@@ -321,7 +321,7 @@ class ForcesShader:
         ]
 
         grid_size = int(math.sqrt(num_points) + 1)
-        print(f"Grid size: {grid_size} for num_points: {num_points}")
+        # print(f"Grid size: {grid_size} for num_points: {num_points}")
         algorithm = mgr.algorithm(
             tensors=params,  # The stencil_tensor is the only output parameter
             spirv=self.shader_code.spv,
@@ -433,7 +433,7 @@ class CenterScaleShader:
             scale = 0.0
             diameter = 0.0
 
-        print(f"Center/scale scale: {scale} diameter: {diameter}")
+        # print(f"Center/scale scale: {scale} diameter: {diameter}")
         push_constants = [
             float(num_points),
             float(scale),
@@ -460,8 +460,8 @@ class CenterScaleShader:
         seq.eval_await()
         # dbg_np = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
         updated_points = np.reshape(points_in.data(), (num_points, 2))
-        print(
-            f"Update max: {np.max(updated_points, axis=0)} min:"
-            f" {np.min(updated_points, axis=0)}"
-        )
+        # print(
+        #    f"Update max: {np.max(updated_points, axis=0)} min:"
+        #    f" {np.min(updated_points, axis=0)}"
+        # )
         # print(f"Updated points after center and scale: {updated_points}")

@@ -4,7 +4,8 @@ from joblib import cpu_count, Parallel, delayed
 from typing import Tuple, List
 from numba import njit
 from scipy.sparse import coo_matrix
-from openTSNE import affinity
+
+# from openTSNE import affinity
 
 
 def euclidian_sqrdistance_matrix(
