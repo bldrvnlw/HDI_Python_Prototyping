@@ -113,7 +113,7 @@ class StencilShader:
         debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
 
         # print(f"bounds {bounds}")
-        np.set_printoptions(threshold=sys.maxsize)
+        # np.set_printoptions(threshold=sys.maxsize)
         # print(f"Points  {points}")
         stencil_np_array = np.zeros((height, width, 4), dtype=np.uint8)
         stencil_out = mgr.image(stencil_np_array, width, height, 4)
@@ -172,9 +172,9 @@ class FieldComputationShader:
         self.shader_code.compile()
         self.kernel_radius: float = 32.0
         self.kernel_width: int = int(self.kernel_radius * 2 + 1)
-        self.TSNEKernel: np.array = np.zeros(
-            (self.kernel_width, self.kernel_width, 4), dtype=np.float32
-        )
+        # self.TSNEKernel: np.array = np.zeros(
+        #    (self.kernel_width, self.kernel_width, 4), dtype=np.float32
+        # )
         self.func_support: float = 6.5
         self.field_texture: np.array = None
 
@@ -276,9 +276,9 @@ class InterpolationShader:
         seq.eval_async(kp.OpSyncLocal([interp_fields_out, sum_out]))
         seq.eval_await()
 
-        self.interp_fields = (
-            np.array(interp_fields_out.data()).reshape(num_points, 4).astype(np.float32)
-        )
+        # self.interp_fields = (
+        #    np.array(interp_fields_out.data()).reshape(num_points, 4).astype(np.float32)
+        # )
 
         self.sumQ = sum_out.data()
         # print(f"Interpolation Sum: {self.sumQ}")
@@ -459,7 +459,7 @@ class CenterScaleShader:
         seq.eval_async(kp.OpSyncLocal([points_in]))
         seq.eval_await()
         # dbg_np = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
-        updated_points = np.reshape(points_in.data(), (num_points, 2))
+        # updated_points = np.reshape(points_in.data(), (num_points, 2))
         # print(
         #    f"Update max: {np.max(updated_points, axis=0)} min:"
         #    f" {np.min(updated_points, axis=0)}"

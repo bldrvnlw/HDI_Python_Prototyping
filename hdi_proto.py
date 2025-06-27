@@ -106,6 +106,9 @@ a_num_points = np.array([num_points], dtype=np.uint32)
 persistent_tensors.set_tensor_data(ShaderBuffers.NUM_POINTS, a_num_points)
 
 print("Starting GPU iterations")
+import time
+
+start = time.time()
 for i in range(num_iterations):
     exaggeration = start_exaggeration
     if i > decay_start and i < decay_start + decay_length:
@@ -225,7 +228,8 @@ for i in range(num_iterations):
     #    plt.show(block=False)
     # time.sleep(0.5)
 
-
+end = time.time()
+print(f"Elapsed time {end-start}")
 points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
 xy = points.reshape(num_points, 2)
 print(f"xy.shape {xy.shape}")
