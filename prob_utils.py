@@ -5,7 +5,8 @@ from typing import Tuple, List
 from numba import njit
 from scipy.sparse import coo_matrix
 
-# from openTSNE import affinity
+from openTSNE import affinity
+import torch
 
 
 def euclidian_sqrdistance_matrix(
@@ -113,7 +114,7 @@ def _h_beta_numba(D_i, beta_i):
         beta_i (float): current 1/(2*sigma^2) estimate for row i
 
     Returns:
-        tuple(float, nd.array[np.float32]): estimated total_entropy i.e. log(perplexity) and distribution
+        tuple(float, nd.array[np.float32]): estimated total_entropy i.e. log(perplexity) and conditioal distribution
     """
     # Calculate the gaussian value array for each neighbour of point i
     # https://latex.codecogs.com/gif.latex?\exp(-(||x_i-x_j||^2)/(2\sigma^2_i))
@@ -121,9 +122,9 @@ def _h_beta_numba(D_i, beta_i):
     # sum the gaussians on the current point
     # https://latex.codecogs.com/gif.latex?\sum_{k&space;\neq&space;i}^{N}\exp(-(||x_i-x_j||^2)/(2\sigma^2_i))
     sum_Gi = np.sum(Gi)
-    Pji = Gi / (sum_Gi + 1e-10)  # calculate the probability similarity distribution
-    H = -np.sum(Pji * np.log(Pji + 1e-10))  # estimate of log(target_perplexity)
-    return H, Pji
+    Pjci = Gi / (sum_Gi + 1e-10)  # calculate the probability similarity distribution
+    H = -np.sum(Pjci * np.log(Pjci + 1e-10))  # estimate of log(target_perplexity)
+    return H, Pjci
 
 
 # Implement with numba
@@ -135,6 +136,9 @@ def _h_beta_numba(D_i, beta_i):
 #
 # In practice we look for beta defined as 1/(2*sigma^2) and
 # the comparison is performed with a tolerance
+# Return the conditional probabilities Pj|i
+# These need to be symmetrized and normalized for the
+# high dimensional probabilities Pij
 
 
 @njit
@@ -152,7 +156,7 @@ def binary_search_perplexity_numba(D, target_entropy, tol=1e-5, max_iter=200):
         # and the corresponding probability array - P_est
         # for the current point distances - D[i]
         # given an estimated beta value
-        H_est, P_est = _h_beta_numba(D[i], beta)
+        H_est, Pjci_est = _h_beta_numba(D[i], beta)
 
         iter_count = 0
         # Is H_est withing the tolerance bounds or should we continue iterating
@@ -170,10 +174,10 @@ def binary_search_perplexity_numba(D, target_entropy, tol=1e-5, max_iter=200):
                 else:
                     beta = (beta + beta_min) / 2.0
 
-            H_est, P_est = _h_beta_numba(D[i], beta)
+            H_est, Pjci_est = _h_beta_numba(D[i], beta)
             iter_count += 1
 
-        P[i] = P_est
+        P[i] = Pjci_est
         sigmas[i] = np.sqrt(1 / (2 * beta))
 
     return P, sigmas
@@ -184,13 +188,30 @@ def compute_perplexity_probs_numba(D, perplexity=30.0, tol=1e-5, max_iter=200):
     return binary_search_perplexity_numba(D, target_entropy, tol, max_iter)
 
 
-def symmetrize_probs(P_cond, neighbors, N, nn):
+def symmetrize_probs(P_cond, neighbors, N, nn, normalize=True):
+    """_summTake the Pj|i conditional probabilities and return the
+    symmetrized and optionally normalized Pij high dimensional probabilities
+    https://latex.codecogs.com/gif.latex?p_{ij}=p_{j|i}+p_{i|j}/2N
+    https://arxiv.org/pdf/1805.10817 Eq 2
+
+    Args:
+        P_cond (_type_): Conditional probs denoted by Pj|i
+        neighbors (_type_): The neighbor indexes
+        N (_type_): number of points
+        nn (_type_): number of neighbours
+
+    Returns:
+        _type_: Symmetrized and normalized (if set) Pij
+    """
 
     P_sym = P_cond.copy()
+    norm_fac = 1.0
+    if normalize:
+        norm_fac = float(N)
     for i in range(N):
         for k in range(nn):
             j = neighbors[i, k]
-            pij = P_cond[i, k]
+            picj = P_cond[i, k]
 
             # Check if j also has i in its neighbor list
             rev_idx = -1
@@ -199,12 +220,12 @@ def symmetrize_probs(P_cond, neighbors, N, nn):
                 match_idxs = np.where(neighbors[j, :] == i)[0]
                 if match_idxs.size > 0:
                     rev_idx = match_idxs[0]
-                    pji = P_cond[j, rev_idx]
-                    pij_sym = (pij + pji) / 2
+                    pjci = P_cond[j, rev_idx]
+                    pij_sym = (picj + pjci) / (2.0 * norm_fac)
                 else:
-                    pij_sym = pij / 2
+                    pij_sym = picj / norm_fac
             except IndexError:
-                pij_sym = pij
+                pij_sym = picj / norm_fac
             P_sym[i, k] = pij_sym
             if rev_idx > -1:
                 P_sym[j, rev_idx] = pij_sym
@@ -345,6 +366,7 @@ def getProbabilitiesOpenTSNE(
     metric: str = "euclidean",
     njobs: int = 20,
     symmetrize: bool = True,
+    denormalize: bool = True,
     verbose: bool = True,
 ):
     # defaults to annot
@@ -355,9 +377,10 @@ def getProbabilitiesOpenTSNE(
         n_jobs=njobs,
         symmetrize=symmetrize,
         verbose=verbose,
+        method="annoy",
     )
     P = affinities.P
-    P.sort_indices()
+    # P.sort_indices()
     num_points = X.shape[0]
     indices = np.empty((num_points * 2), dtype=np.uint32)
 
@@ -374,13 +397,51 @@ def getProbabilitiesOpenTSNE(
 
     neighbours = np.empty((total), dtype=np.uint32)
     probabilities = np.empty((total), dtype=np.float32)
+    denorm_value = 1
+    if denormalize:
+        denorm_value = num_points
     for i in range(P.shape[0]):
         row = P.getrow(i)
         neighbours[range(indices[i * 2], indices[i * 2] + indices[i * 2 + 1])] = (
             row.indices
         )
+        # probabilities from openTSNE affinity are normalized over num_points
         probabilities[range(indices[i * 2], indices[i * 2] + indices[i * 2 + 1])] = (
-            row.data
+            row.data * denorm_value
         )
 
     return neighbours, probabilities, indices
+
+
+from numba import njit, prange
+
+
+@njit(parallel=True)
+def calculate_normalization_Q(points):
+    n = points.shape[0]
+    total_sum = 0.0
+
+    for i in prange(n):  # prange enables parallel execution of the outer loop
+        for j in range(i + 1, n):  # Only calculate unique pairs (j > i)
+            diff_x = points[i, 0] - points[j, 0]
+            diff_y = points[i, 1] - points[j, 1]
+            D = diff_x**2 + diff_y**2
+            total_sum += 1.0 / (1.0 + D)
+
+    total_sum = total_sum * 2
+    return total_sum
+
+
+def compute_Qnorm_cuda(points, eps=1e-12):
+    p_tensor = torch.tensor(points, device="cuda")
+
+    # Compute pairwise squared distances
+    D = torch.cdist(p_tensor, p_tensor, p=2)
+    # print(f"distance shape {D.shape} device {D.device}")
+
+    # Compute Q matrix
+    num = 1 / (1.0 + D)  # t-SNE kernel
+    # print(f"num shape {num.shape} device {num.device}")
+    num.fill_diagonal_(0.0)  # set Q_ii = 0
+
+    return num.sum().item()
