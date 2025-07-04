@@ -21,6 +21,8 @@ from prob_utils import (
     symmetrize_probs,
     get_random_uniform_circular_embedding,
     getProbabilitiesOpenTSNE,
+    calculate_normalization_Q,
+    compute_Qnorm_cuda,
 )
 from shaders.persistent_tensors import (
     LinearProbabilityMatrix,
@@ -28,7 +30,7 @@ from shaders.persistent_tensors import (
     ShaderBuffers,
 )
 
-from data_sources import get_generated, get_MNIST
+from data_sources import get_generated, get_MNIST, get_mouse_Zheng
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
@@ -41,49 +43,55 @@ update_shader = UpdateShader()
 centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
 
-num_points = 60000
-perplexity = 30
-perplexity_multiplier = 3
+
+perplexity = 30  # was 30
+perplexity_multiplier = 3  # was 3
 nn = perplexity * perplexity_multiplier + 1
 
-X, y, colors, unique_colors = get_MNIST(num_points=num_points)
+num_points = 200000
+# X, y, colors, unique_colors = get_MNIST(num_points=num_points)
+X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
 
 # randomly initialize the embedding
 points = get_random_uniform_circular_embedding(num_points, 0.1)
 
-distances, neighbours, indices = compute_annoy_probabilities(
-    data=X,
-    num_trees=int(math.sqrt(num_points)),
-    nn=nn,
-)
+# distances, neighbours, indices = compute_annoy_probabilities(
+#     data=X,
+#     num_trees=int(math.sqrt(num_points)),
+#     nn=nn,
+# )
 
 # print(f"dist {distances.shape} distances {distances}")
 # print(f"indices {indices.shape} indices {indices}")
 # print(f"neigh {neighbours.shape} neighbours {neighbours}")
 
 # Compute the perplexity probabilities
-P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
-P_sym = symmetrize_probs(P, neighbours, num_points, nn)
+# P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
+# P_sym = symmetrize_probs(P, neighbours, num_points, nn, normalize=False)
+# print(
+#     "Ratio of symmetrized High Dimensional Probability to num_points\n"
+#     f"(should be approx 1): {P_sym.sum().sum()/num_points}"
+# )
+# # print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
 
-# print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
-
-prob_matrix = LinearProbabilityMatrix(
-    neighbours=np.ravel(neighbours),
-    probabilities=np.ravel(P_sym),
-    indices=indices,
-)
+# prob_matrix = LinearProbabilityMatrix(
+#     neighbours=np.ravel(neighbours),
+#     probabilities=np.ravel(P_sym),
+#     indices=indices,
+# )
 
 # Or Using OpenTSNE
-# neighbours, probabilities, indices = getProbabilitiesOpenTSNE(X, perplexity=perplexity)
+neighbours, probabilities, indices = getProbabilitiesOpenTSNE(X, perplexity=perplexity)
 # Create a manager for the shaders
 # and persistent buffers
 
+# probabilities = probabilities * num_points
 
-# prob_matrix = LinearProbabilityMatrix(
-#    neighbours=neighbours,
-#    probabilities=probabilities,
-#    indices=indices,
-# )
+prob_matrix = LinearProbabilityMatrix(
+    neighbours=neighbours,
+    probabilities=probabilities,
+    indices=indices,
+)
 
 
 mgr = Manager()
@@ -95,10 +103,12 @@ persistent_tensors = PersistentTensors(
 
 # for all iterations
 num_iterations = 1000
-start_exaggeration = 4.0  # should decay at a certain point
+start_exaggeration = 4.0  # was 4.0  # should decay at a certain point
 end_exaggeration = 1.0
 decay_start = 250
-decay_length = 200
+decay_length = 200  # was 200
+
+klvalues = np.zeros((num_iterations,))
 
 # plt.figure(0)
 # plt.scatter(points[:, 0], points[:, 1], c=colors, alpha=0.7)
@@ -176,12 +186,21 @@ for i in range(num_iterations):
         print("!!!! Breaking out due to interpolation sum 0 !!!!")
         break
 
-    forces_shader.compute(
+    # q_norm = calculate_normalization_Q(points)
+    # q_norm = compute_Qnorm_cuda(points)
+    # print(f"q_norm:  {q_norm}")
+    # q_norm = interpolation_shader.sumQ[0]
+    sum_kl = forces_shader.compute(
         mgr=mgr,
         num_points=num_points,
         exaggeration=exaggeration,
         persistent_tensors=persistent_tensors,
     )
+    klvalues[i] = sum_kl
+    print(f"Iteration {i} Sum KL {sum_kl} ")
+    if i % 1 == 0:
+        pass
+        #
 
     update_shader.compute(
         mgr=mgr,
@@ -189,9 +208,9 @@ for i in range(num_iterations):
         eta=200.0,
         minimum_gain=0.1,
         iteration=i,
-        momentum=0.2,
-        momentum_switch=250,
-        momentum_final=0.5,
+        momentum=0.2,  # was 0.2
+        momentum_switch=250,  # was 250,
+        momentum_final=0.5,  # was 0.5,
         gain_multiplier=4.0,
         persistent_tensors=persistent_tensors,
     )
@@ -233,14 +252,32 @@ print(f"Elapsed time {end-start}")
 points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
 xy = points.reshape(num_points, 2)
 print(f"xy.shape {xy.shape}")
-# mgr.destroy()
+
 plt.figure(i)
-scatter = plt.scatter(xy[:, 0], xy[:, 1], c=colors, alpha=0.7)
+scatter = plt.scatter(
+    xy[:, 0], xy[:, 1], c=colors, s=40 / math.log10(num_points), alpha=0.7
+)
+plt.tight_layout()
 custom = [
-    Line2D([], [], marker=".", markersize=10, color=unique_colors[i], linestyle="None")
-    for i in range(0, 10)
+    Line2D(
+        [],
+        [],
+        marker=".",
+        markersize=4.0,
+        color=unique_colors[i],
+        linestyle="None",
+    )
+    for i in range(0, len(unique_colors))
 ]
-plt.legend(custom, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], loc="lower left", title="Digits")
+plt.legend(
+    custom,
+    [x for x in range(0, len(unique_colors))],
+    loc="lower left",
+    title="Cluster",
+    prop={"size": 8},
+)
+plt.figure(i + 1)
+plt.plot(range(0, num_iterations), klvalues)
 plt.show()
 mgr.destroy()
 print("Iterations complete")
