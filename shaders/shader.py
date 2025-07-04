@@ -303,6 +303,7 @@ class ForcesShader:
         interp_fields_in = persistent_tensors.get_tensor(ShaderBuffers.INTERP_FIELDS)
         gradients_out = persistent_tensors.get_tensor(ShaderBuffers.GRADIENTS)
         num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
+        sum_kl = persistent_tensors.get_tensor(ShaderBuffers.KL)
 
         params = [
             points_in,
@@ -312,6 +313,7 @@ class ForcesShader:
             interp_fields_in,
             gradients_out,
             num_points_tensor,
+            sum_kl,
         ]
         sumq_data = persistent_tensors.get_tensor_data(ShaderBuffers.SUM_Q)
 
@@ -336,10 +338,13 @@ class ForcesShader:
         )
 
         seq = mgr.sequence()
-        seq.eval_async(kp.OpSyncLocal([gradients_out]))
+        seq.eval_async(kp.OpSyncLocal([gradients_out, sum_kl]))
         seq.eval_await()
 
         grad = gradients_out.data()
+        sum_kl = sum_kl.data()
+        return sum_kl[0]
+        # print(f"Sum KL: {sum_kl}")
         # return (interp_fields, )
         # print(f"Gradient: {grad}")
 
