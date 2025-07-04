@@ -27,6 +27,7 @@ class ShaderBuffers(IntEnum):
     NUM_POINTS = (
         11,
     )  # a single digit for the num_points (because of push constant limits)
+    KL = (12,)  # float: 1 (sum of KL divergence)
 
 
 class LinearProbabilityMatrix:
@@ -112,6 +113,7 @@ class PersistentTensors:
                 np.zeros((self.num_points, 4), dtype=np.float32)
             ),
             ShaderBuffers.SUM_Q: self.mgr.tensor(np.zeros((1,), dtype=np.float32)),
+            ShaderBuffers.KL: self.mgr.tensor(np.zeros((1,), dtype=np.float32)),
             ShaderBuffers.GRADIENTS: self.mgr.tensor(
                 np.zeros((self.num_points, 2), dtype=np.float32)
             ),
