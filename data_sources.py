@@ -7,12 +7,14 @@ import gzip
 import pickle
 
 
-def label_to_colors(labels, cmap="tab10"):
+def label_to_colors(labels, cmap="tab10", seed=42):
     unique_labels = np.unique(labels)
+    rng = np.random.default_rng(seed)
     # colormap = plt.get_cmap(cmap)
     if cmap == "random":
         # Generate a random colormap
-        colormap = np.random.rand(len(unique_labels), 3).tolist()
+        # colormap = np.random.rand(len(unique_labels), 3).tolist()
+        colormap = rng.random((len(unique_labels), 3)).tolist()
     else:
         colormap = plt.get_cmap(cmap).colors
     label_to_color = {label: colormap[i] for i, label in enumerate(unique_labels)}

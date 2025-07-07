@@ -313,7 +313,7 @@ def compute_annoy_distances(
 
 
 def get_random_uniform_circular_embedding(
-    num_points: int, radius: float
+    num_points: int, radius: float, seed: int = 42
 ) -> np.ndarray[np.float32]:
     """Generate a ndarray shape: (num_points, 2) containing x,y coordinates
     of points uniformly distributed within the circle of given radius
@@ -326,7 +326,7 @@ def get_random_uniform_circular_embedding(
     Returns:
         np.ndarray[np.float32]: The uniform circular distrubution
     """
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed)
     x = radius + 0.1
     y = radius + 0.1
     sqr_rad = radius * radius
