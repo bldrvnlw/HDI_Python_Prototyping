@@ -15,12 +15,12 @@ from kp import Manager
 
 # from openTSNE import affinity
 from prob_utils import (
-    compute_annoy_probabilities,
+    compute_annoy_distances,
     euclidian_sqrdistance_matrix,
     compute_perplexity_probs_numba,
-    symmetrize_probs,
     get_random_uniform_circular_embedding,
     getProbabilitiesOpenTSNE,
+    symmetrize_P,
     calculate_normalization_Q,
     compute_Qnorm_cuda,
 )
@@ -45,47 +45,43 @@ centerscale_shader = CenterScaleShader()
 
 
 perplexity = 30  # was 30
-perplexity_multiplier = 3  # was 3
-nn = perplexity * perplexity_multiplier + 1
 
-num_points = 200000
-# X, y, colors, unique_colors = get_MNIST(num_points=num_points)
-X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
+
+num_points = 60000
+X, y, colors, unique_colors = get_MNIST(num_points=num_points)
+# X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
 
 # randomly initialize the embedding
 points = get_random_uniform_circular_embedding(num_points, 0.1)
 
-# distances, neighbours, indices = compute_annoy_probabilities(
-#     data=X,
-#     num_trees=int(math.sqrt(num_points)),
-#     nn=nn,
-# )
+perplexity_multiplier = 3  # was 3
+nn = perplexity * perplexity_multiplier
+distances, neighbours, indices = compute_annoy_distances(
+    data=X,
+    num_trees=int(math.sqrt(num_points)),
+    nn=nn,
+)
 
-# print(f"dist {distances.shape} distances {distances}")
-# print(f"indices {indices.shape} indices {indices}")
-# print(f"neigh {neighbours.shape} neighbours {neighbours}")
+# # print(f"dist {distances.shape} distances {distances}")
+# # print(f"indices {indices.shape} indices {indices}")
+# # print(f"neigh {neighbours.shape} neighbours {neighbours}")
 
-# Compute the perplexity probabilities
-# P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
-# P_sym = symmetrize_probs(P, neighbours, num_points, nn, normalize=False)
+# # Compute the perplexity probabilities
+P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
+# Symmetrize and flatten to indexes 1D arrays
+neighbours, probabilities, indices = symmetrize_P(P, neighbours, nn)
 # print(
 #     "Ratio of symmetrized High Dimensional Probability to num_points\n"
 #     f"(should be approx 1): {P_sym.sum().sum()/num_points}"
 # )
-# # print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
+# # # print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
 
-# prob_matrix = LinearProbabilityMatrix(
-#     neighbours=np.ravel(neighbours),
-#     probabilities=np.ravel(P_sym),
-#     indices=indices,
-# )
 
 # Or Using OpenTSNE
-neighbours, probabilities, indices = getProbabilitiesOpenTSNE(X, perplexity=perplexity)
+# neighbours, probabilities, indices = getProbabilitiesOpenTSNE(X, perplexity=perplexity)
 # Create a manager for the shaders
 # and persistent buffers
 
-# probabilities = probabilities * num_points
 
 prob_matrix = LinearProbabilityMatrix(
     neighbours=neighbours,

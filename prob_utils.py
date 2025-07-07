@@ -3,7 +3,7 @@ from annoy import AnnoyIndex
 from joblib import cpu_count, Parallel, delayed
 from typing import Tuple, List
 from numba import njit
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csr_matrix
 
 from openTSNE import affinity
 import torch
@@ -188,58 +188,55 @@ def compute_perplexity_probs_numba(D, perplexity=30.0, tol=1e-5, max_iter=200):
     return binary_search_perplexity_numba(D, target_entropy, tol, max_iter)
 
 
-def symmetrize_probs(P_cond, neighbors, N, nn, normalize=True):
-    """_summTake the Pj|i conditional probabilities and return the
-    symmetrized and optionally normalized Pij high dimensional probabilities
-    https://latex.codecogs.com/gif.latex?p_{ij}=p_{j|i}+p_{i|j}/2N
-    https://arxiv.org/pdf/1805.10817 Eq 2
+def symmetrize_P(P_cond, neighbors, nn, denormalize=True):
+    num_points = P_cond.shape[0]
+    P = csr_matrix(
+        (
+            P_cond.ravel(),
+            neighbors.ravel(),
+            range(0, num_points * nn + 1, nn),
+        ),
+        shape=(num_points, num_points),
+    )
+    # Simple symmetrization creates missing probability values in sparse array
+    # so the size will be > (num_points * nn)
+    P = (P + P.T) / 2.0
+    # denormalize
+    P /= np.sum(P)
+    # flatten the probabilities and neighbours into indexed 1D arrays
+    offset = 0
+    length = 0
+    total = 0
 
-    Args:
-        P_cond (_type_): Conditional probs denoted by Pj|i
-        neighbors (_type_): The neighbor indexes
-        N (_type_): number of points
-        nn (_type_): number of neighbours
+    indices = np.empty((num_points * 2), dtype=np.uint32)
+    for i in range(P.shape[0]):
+        row = P.getrow(i)
+        indices[i * 2] = offset
+        length = row.data.shape[0]
+        indices[i * 2 + 1] = length
+        total = total + length
+        offset += length
+    print(f"Total number of symmetrized conditions probs: {total} ")
+    neighbours = np.empty((total), dtype=np.uint32)
+    probabilities = np.empty((total), dtype=np.float32)
+    denorm_value = 1
+    if denormalize:
+        denorm_value = num_points
 
-    Returns:
-        _type_: Symmetrized and normalized (if set) Pij
-    """
+    for i in range(P.shape[0]):
+        row = P.getrow(i)
+        neighbours[range(indices[i * 2], indices[i * 2] + indices[i * 2 + 1])] = (
+            row.indices
+        )
+        # probabilities from openTSNE affinity are normalized over num_points
+        probabilities[range(indices[i * 2], indices[i * 2] + indices[i * 2 + 1])] = (
+            row.data * denorm_value
+        )
 
-    P_sym = P_cond.copy()
-    norm_fac = 1.0
-    if normalize:
-        norm_fac = float(N)
-    for i in range(N):
-        for k in range(nn):
-            j = neighbors[i, k]
-            picj = P_cond[i, k]
-
-            # Check if j also has i in its neighbor list
-            rev_idx = -1
-            pij_sym = 0
-            try:
-                match_idxs = np.where(neighbors[j, :] == i)[0]
-                if match_idxs.size > 0:
-                    rev_idx = match_idxs[0]
-                    pjci = P_cond[j, rev_idx]
-                    pij_sym = (picj + pjci) / (2.0 * norm_fac)
-                else:
-                    pij_sym = picj / norm_fac
-            except IndexError:
-                pij_sym = picj / norm_fac
-            P_sym[i, k] = pij_sym
-            if rev_idx > -1:
-                P_sym[j, rev_idx] = pij_sym
-
-    return P_sym
-
-
-def symmetrize_P(P_cond):
-    N = P_cond.shape[0]
-    P = (P_cond + P_cond.T) / 2.0
-    return P
+    return neighbours, probabilities, indices
 
 
-def compute_annoy_probabilities(
+def compute_annoy_distances(
     data: np.ndarray[np.float32],
     num_trees: int = 20,
     nn: int = 30,
@@ -265,7 +262,7 @@ def compute_annoy_probabilities(
     for i in range(num_points):
         annoy_index.add_item(i, data[i])
 
-    annoy_index.build(num_trees)
+    annoy_index.build(num_trees, n_jobs=10)
 
     # Sample check if enough neighbours are available
     # for i in range(100):
@@ -287,6 +284,10 @@ def compute_annoy_probabilities(
         neighbours_i, distances_i = annoy_index.get_nns_by_item(
             np.int32(i), nn + 1, include_distances=True
         )
+        # print(f"Num neighbours {neighbours_i.shape[0]}")
+        assert (
+            len(neighbours_i) == nn + 1
+        ), f"Unexpected number of neighbours {len(neighbours_i)}"
         neighbours[i] = neighbours_i[1:]
         if len(neighbours_i) < nn + 1:
             raise Exception(f"Too few neighbours {len(neighbours_i)} ")
@@ -296,6 +297,9 @@ def compute_annoy_probabilities(
     # Parallel processing to speed up the nearest neighbor search
 
     num_jobs = cpu_count()
+    # neighbours_i, distances_i = annoy_index.get_nns_by_item(
+    #    np.int32(0), nn + 1, include_distances=True
+    # )
     Parallel(n_jobs=num_jobs, require="sharedmem", prefer="threads")(
         delayed(getnns)(i) for i in range(num_points)
     )
