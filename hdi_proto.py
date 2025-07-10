@@ -16,6 +16,7 @@ from kp import Manager
 # from openTSNE import affinity
 from prob_utils import (
     compute_annoy_distances,
+    compute_hnsw_distances,
     euclidian_sqrdistance_matrix,
     compute_perplexity_probs_numba,
     get_random_uniform_circular_embedding,
@@ -44,23 +45,30 @@ centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
 
 
-perplexity = 30  # was 30
+perplexity = 90  # was 30
 
 
-num_points = 60000
-X, y, colors, unique_colors = get_MNIST(num_points=num_points)
-# X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
+num_points = 1306127  # all in Zheng 1306127
+X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
+# num_points = 70000  # al in MNIST
+# X, y, colors, unique_colors = get_MNIST(num_points=num_points)
 
+knn_algorithm = "HNSW"  # Annoy or HNSW
 # randomly initialize the embedding
 points = get_random_uniform_circular_embedding(num_points, 0.1)
 
 perplexity_multiplier = 3  # was 3
 nn = perplexity * perplexity_multiplier
-distances, neighbours, indices = compute_annoy_distances(
-    data=X,
-    num_trees=int(math.sqrt(num_points)),
-    nn=nn,
-)
+if knn_algorithm == "Annoy":
+    print("Using Annoy")
+    distances, neighbours, indices = compute_annoy_distances(
+        data=X,
+        num_trees=int(math.sqrt(num_points)),
+        nn=nn,
+    )
+else:
+    print("Using HNSW")
+    distances, neighbours, indices = compute_hnsw_distances(data=X, nn=nn)
 
 # # print(f"dist {distances.shape} distances {distances}")
 # # print(f"indices {indices.shape} indices {indices}")
@@ -70,10 +78,10 @@ distances, neighbours, indices = compute_annoy_distances(
 P, sigmas = compute_perplexity_probs_numba(distances, perplexity=perplexity)
 # Symmetrize and flatten to indexes 1D arrays
 neighbours, probabilities, indices = symmetrize_P(P, neighbours, nn)
-# print(
-#     "Ratio of symmetrized High Dimensional Probability to num_points\n"
-#     f"(should be approx 1): {P_sym.sum().sum()/num_points}"
-# )
+print(
+    "Ratio of symmetrized High Dimensional Probability to num_points\n"
+    f"(should be approx 1): {probabilities.sum()/num_points}"
+)
 # # # print(f"Perplexity matrix {P.shape} sigmas {sigmas.shape}")
 
 
@@ -259,7 +267,7 @@ custom = [
         [],
         [],
         marker=".",
-        markersize=4.0,
+        markersize=8.0,
         color=unique_colors[i],
         linestyle="None",
     )

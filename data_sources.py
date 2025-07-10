@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.datasets import make_classification
 from sklearn import datasets
 import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
 import gzip
 import pickle
 
@@ -48,8 +49,20 @@ def get_MNIST(num_points: int) -> Tuple[np.array, np.array, List[int]]:
     import matplotlib.pyplot as plt
 
     # import matrix_viewer
-
-    colors, unique_colors = label_to_colors(y)
+    col_list = [
+        "#EE3333",
+        "#FF9900",
+        "#FFEE00",
+        "#AACC11",
+        "#44AA77",
+        "#0099EE",
+        "#0066BB",
+        "#443388",
+        "#992288",
+        "#EE0077",
+    ]
+    cmap = mcolors.ListedColormap(col_list)
+    colors, unique_colors = label_to_colors(y, cmap)
     return (X, y, colors, unique_colors)
 
 

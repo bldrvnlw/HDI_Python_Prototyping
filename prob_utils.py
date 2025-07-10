@@ -4,6 +4,7 @@ from joblib import cpu_count, Parallel, delayed
 from typing import Tuple, List
 from numba import njit
 from scipy.sparse import coo_matrix, csr_matrix
+import hnswlib
 
 from openTSNE import affinity
 import torch
@@ -234,6 +235,37 @@ def symmetrize_P(P_cond, neighbors, nn, denormalize=True):
         )
 
     return neighbours, probabilities, indices
+
+
+def compute_hnsw_distances(
+    data: np.ndarray[np.float32], nn: int = 30, ef: int = 200, M: int = 16
+) -> Tuple[np.ndarray[np.float32], np.ndarray[np.uint32], np.ndarray[np.int32]]:
+    num_points, dim = data.shape
+    p = hnswlib.Index(space="l2", dim=dim)  # euclidean
+    p.init_index(max_elements=num_points, ef_construction=ef, M=M)
+    ids = np.arange(num_points)
+    p.add_items(data, ids)
+    p.set_ef(nn * 3)
+    labels, dist = p.knn_query(data, k=nn + 1)
+
+    distances = np.zeros((num_points, nn))
+    neighbours = np.zeros((num_points, nn)).astype(np.uint32)
+    indices = np.zeros((num_points, 2)).astype(np.uint32)
+
+    def serialize(i):
+        neighbours[i] = labels[i, 1:]
+        distances[i] = dist[i, 1:]
+        indices[i] = [i * nn, nn]
+
+    num_jobs = cpu_count()
+    Parallel(n_jobs=num_jobs, require="sharedmem", prefer="threads")(
+        delayed(serialize)(i) for i in range(num_points)
+    )
+    return (
+        distances,
+        neighbours,
+        indices,
+    )
 
 
 def compute_annoy_distances(
