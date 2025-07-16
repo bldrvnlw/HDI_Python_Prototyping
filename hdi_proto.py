@@ -12,6 +12,8 @@ import math
 import time
 import numpy as np
 from kp import Manager
+import umap
+from nptsne import TextureTsne, KnnAlgorithm
 
 # from openTSNE import affinity
 from prob_utils import (
@@ -25,15 +27,28 @@ from prob_utils import (
     calculate_normalization_Q,
     compute_Qnorm_cuda,
 )
+
+from metrics import compute_coranking_matrix, rnx_auc_crm
+
+from nnp_util import compute_nnp, neighborhood_preservation
+
 from shaders.persistent_tensors import (
     LinearProbabilityMatrix,
     PersistentTensors,
     ShaderBuffers,
 )
 
-from data_sources import get_generated, get_MNIST, get_mouse_Zheng
+from data_sources import (
+    get_generated,
+    get_MNIST,
+    get_mouse_Zheng,
+    get_hypomap,
+    get_xmas_tree,
+)
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+
+from sklearn.manifold import trustworthiness
 
 bounds_shader = BoundsShader()
 stencil_shader = StencilShader()
@@ -44,14 +59,19 @@ update_shader = UpdateShader()
 centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
 
+num_iterations = 1000  # was 1000
+# X, y, colors, unique_colors = get_xmas_tree()
+# num_points = X.shape[0]  # all in xmas_tree
+# perplexity = 15
+# perplexity = 90  # was 30
+# num_points = 50000  # was 433369
+# X, y, colors, unique_colors = get_hypomap(num_points=num_points)
+# num_points = 1306127  # all in Zheng 1306127
+# X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
+perplexity = 30  # was 30
+num_points = 10000  # was 70000 all in MNIST
+X, y, colors, unique_colors = get_MNIST(num_points=num_points)
 
-perplexity = 90  # was 30
-
-
-num_points = 1306127  # all in Zheng 1306127
-X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
-# num_points = 70000  # al in MNIST
-# X, y, colors, unique_colors = get_MNIST(num_points=num_points)
 
 knn_algorithm = "HNSW"  # Annoy or HNSW
 # randomly initialize the embedding
@@ -106,10 +126,10 @@ persistent_tensors = PersistentTensors(
 
 
 # for all iterations
-num_iterations = 1000
+
 start_exaggeration = 4.0  # was 4.0  # should decay at a certain point
 end_exaggeration = 1.0
-decay_start = 250
+decay_start = 250  # was 250
 decay_length = 200  # was 200
 
 klvalues = np.zeros((num_iterations,))
@@ -257,11 +277,48 @@ points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
 xy = points.reshape(num_points, 2)
 print(f"xy.shape {xy.shape}")
 
-plt.figure(i)
-scatter = plt.scatter(
+# perform UMAP
+reducer = umap.UMAP(n_neighbors=perplexity * perplexity_multiplier)
+UMAPembedding = reducer.fit_transform(X)
+# perform old nptsne
+tsne = TextureTsne(True, perplexity=30, knn_algorithm=KnnAlgorithm.HNSW)
+embed_nptsne = tsne.fit_transform(X)
+embed_nptsne = embed_nptsne.reshape(num_points, 2)
+nptsne_klvalues = tsne.kl_values
+
+# neighbors = [int(perplexity / 2), perplexity, perplexity * 2, perplexity * 4]
+# trust = [trustworthiness(X, xy, n_neighbors=int(k)) for k in neighbors]
+# print(f"Trustworthiness for neighbors {neighbors} : {trust}")
+
+# QNX = compute_coranking_matrix(data_ld=xy, data_hd=X)
+
+fig, axs = plt.subplots(figsize=(20, 20), nrows=2, ncols=3)
+
+axs[0][0].scatter(
+    UMAPembedding[:, 0],
+    UMAPembedding[:, 1],
+    c=colors,
+    s=40 / math.log10(num_points),
+    alpha=0.7,
+)
+axs[0][0].set_title("UMAP")
+axs[0][0].set_ylabel("embeddings: ", rotation=0, size="large")
+
+
+axs[0][1].scatter(
+    embed_nptsne[:, 0],
+    embed_nptsne[:, 1],
+    c=colors,
+    s=40 / math.log10(num_points),
+    alpha=0.7,
+)
+axs[0][1].set_title("nptsne")
+
+
+axs[0][2].scatter(
     xy[:, 0], xy[:, 1], c=colors, s=40 / math.log10(num_points), alpha=0.7
 )
-plt.tight_layout()
+
 custom = [
     Line2D(
         [],
@@ -273,15 +330,37 @@ custom = [
     )
     for i in range(0, len(unique_colors))
 ]
-plt.legend(
+axs[0][2].legend(
     custom,
     [x for x in range(0, len(unique_colors))],
     loc="lower left",
     title="Cluster",
     prop={"size": 8},
 )
-plt.figure(i + 1)
-plt.plot(range(0, num_iterations), klvalues)
+
+axs[0][2].set_title("HDILib VK")
+
+axs[1][0].set_ylabel("KL-div: ", rotation=0, size="large")
+axs[1][1].plot(range(0, num_iterations), nptsne_klvalues)
+axs[1][2].plot(range(0, num_iterations), klvalues)
+
+fig.tight_layout()
+# can linit range to range(1,perplexity) but using definition from
+
+# print(f"Area Under RNX Curve: {rnx_auc_crm(QNX)}")
+# print(f"NNP value 2: {neighborhood_preservation(X, xy, nr_neighbors=90)}") approx same as area under RNX curve
+# print(
+#     "NNP value UMAP:"
+#     f" {neighborhood_preservation(embed=UMAPembedding, X=X, nr_neighbors=90)}"
+# )
+# print(
+#     "NNP value nptsne:"
+#     f" {neighborhood_preservation(embed=embed_nptsne, X=X, nr_neighbors=90)}"
+# )
+# print(f"NNP value VK: {neighborhood_preservation(embed=xy, X=X, nr_neighbors=90)}")
+
+
 plt.show()
+input("Press enter to finish...")
 mgr.destroy()
 print("Iterations complete")
