@@ -1,23 +1,30 @@
 from typing import Tuple, List
 import numpy as np
+import pandas as pd
 from sklearn.datasets import make_classification
 from sklearn import datasets
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 import gzip
 import pickle
+import csv
 
 
 def label_to_colors(labels, cmap="tab10", seed=42):
     unique_labels = np.unique(labels)
+    n_labels = len(unique_labels)
     rng = np.random.default_rng(seed)
     # colormap = plt.get_cmap(cmap)
     if cmap == "random":
         # Generate a random colormap
         # colormap = np.random.rand(len(unique_labels), 3).tolist()
-        colormap = rng.random((len(unique_labels), 3)).tolist()
+        colormap = rng.random(size=(n_labels, 3)).tolist()
     else:
-        colormap = plt.get_cmap(cmap).colors
+        cmaptype = plt.get_cmap(cmap)
+        if type(cmaptype) == mcolors.LinearSegmentedColormap:
+            colormap = cmaptype(np.linspace(0, 1, n_labels))
+        else:
+            colormap = cmaptype.colors
     label_to_color = {label: colormap[i] for i, label in enumerate(unique_labels)}
     return [label_to_color[label] for label in labels], [
         label_to_color[label] for label in unique_labels
@@ -38,7 +45,7 @@ def get_generated(num_points: int) -> Tuple[np.array, np.array, List[int]]:
     return (X, y, colors)
 
 
-def get_MNIST(num_points: int) -> Tuple[np.array, np.array, List[int]]:
+def get_MNIST(num_points: int) -> Tuple[np.array, np.array, List[int], List[int]]:
     # X, y = datasets.load_digits(return_X_y=True)
     mnist = datasets.fetch_openml("mnist_784", version=1)
     X_dataframe, y_series = mnist["data"], mnist["target"]
@@ -66,7 +73,7 @@ def get_MNIST(num_points: int) -> Tuple[np.array, np.array, List[int]]:
     return (X, y, colors, unique_colors)
 
 
-def get_mouse_Zheng(num_points: int) -> Tuple[np.array, np.array, List[int]]:
+def get_mouse_Zheng(num_points: int) -> Tuple[np.array, np.array, List[int], List[int]]:
     # Load the mouse dataset from a CSV file
 
     with gzip.open(r"C:\\Users\\bvanlew\\Downloads\\10x_mouse_zheng.pkl.gz", "rb") as f:
@@ -82,4 +89,36 @@ def get_mouse_Zheng(num_points: int) -> Tuple[np.array, np.array, List[int]]:
 
     colors, unique_colors = label_to_colors(y, "random")
 
+    return (X, y, colors, unique_colors)
+
+
+def get_hypomap(num_points: int) -> Tuple[np.array, np.array, List[int], List[int]]:
+    with open(r"C:\\Users\\bvanlew\\Downloads\\hypomap.pkl", "rb") as f:
+        data = pickle.load(f)
+
+    X = data["pca_50"]  # Features
+    y = data["C2_name"]  # Labels
+
+    # Limit to num_points if necessary
+    if num_points < len(X):
+        X = X[:num_points]
+        y = y[:num_points]
+
+    colors, unique_colors = label_to_colors(y, "gist_rainbow")
+
+    return (X, y, colors, unique_colors)
+
+
+def get_xmas_tree() -> Tuple[np.array, np.array, List[int], List[int]]:
+    data = np.loadtxt(
+        r"C:\\Users\\bvanlew\\Downloads\\xmas\\data.csv",
+        delimiter=",",
+        skiprows=1,
+        dtype=int,
+    )
+    X = data[..., 1:]
+    df = pd.read_csv(r"C:\\Users\\bvanlew\\Downloads\\xmas\\metadata.csv")
+    colors = df["main_color"].to_list()
+    unique_colors = np.unique(colors)
+    y = df["main_label"].to_list()
     return (X, y, colors, unique_colors)
