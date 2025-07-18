@@ -30,7 +30,12 @@ from prob_utils import (
 
 from metrics import compute_coranking_matrix, rnx_auc_crm
 
-from nnp_util import compute_nnp, neighborhood_preservation
+from nnp_util import (
+    compute_nnp,
+    neighborhood_preservation_torch,
+    neighborhood_hit_torch,
+    get_shepard_and_stress,
+)
 
 from shaders.persistent_tensors import (
     LinearProbabilityMatrix,
@@ -69,7 +74,7 @@ num_iterations = 1000  # was 1000
 # num_points = 1306127  # all in Zheng 1306127
 # X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
 perplexity = 30  # was 30
-num_points = 10000  # was 70000 all in MNIST
+num_points = 20000  # was 70000 all in MNIST
 X, y, colors, unique_colors = get_MNIST(num_points=num_points)
 
 
@@ -286,6 +291,32 @@ embed_nptsne = tsne.fit_transform(X)
 embed_nptsne = embed_nptsne.reshape(num_points, 2)
 nptsne_klvalues = tsne.kl_values
 
+NNP_VK = neighborhood_preservation_torch(X, xy, nr_neighbors=90)
+NNP_UMAP = neighborhood_preservation_torch(embed=UMAPembedding, X=X, nr_neighbors=90)
+NNP_NPTSNE = neighborhood_preservation_torch(embed=embed_nptsne, X=X, nr_neighbors=90)
+
+int_labels = y.astype(np.int32)
+NHIT_VK = neighborhood_hit_torch(xy, int_labels, nr_neighbors=90)
+NHIT_UMAP = neighborhood_hit_torch(UMAPembedding, int_labels, nr_neighbors=90)
+NHIT_NPTSNE = neighborhood_hit_torch(embed_nptsne, int_labels, nr_neighbors=90)
+
+SHEPHARD_VK, STRESS_VK = get_shepard_and_stress(X, xy)
+SHEPHARD_UMAP, STRESS_UMAP = get_shepard_and_stress(X, UMAPembedding)
+SHEPHARD_NPTSNE, STRESS_NPTSNE = get_shepard_and_stress(X, embed_nptsne)
+
+print(f"NNP value VK: {NNP_VK}")  # approx same as area under RNX curve
+print(f"NHIT value VK: {NHIT_VK}")
+print(f"SHEPHARD value VK: {SHEPHARD_VK}")
+print(f"STRESS value VK: {STRESS_VK}")
+print(f"NNP value UMAP: {NNP_UMAP}")
+print(f"NHIT value UMAP: {NHIT_UMAP}")
+print(f"SHEPHARD value UMAP: {SHEPHARD_UMAP}")
+print(f"STRESS value UMAP: {STRESS_UMAP}")
+print(f"NNP value nptsne: {NNP_NPTSNE}")
+print(f"NHIT value nptsne: {NHIT_NPTSNE}")
+print(f"SHEPHARD value nptsne: {SHEPHARD_NPTSNE}")
+print(f"STRESS value nptsne: {STRESS_NPTSNE}")
+
 # neighbors = [int(perplexity / 2), perplexity, perplexity * 2, perplexity * 4]
 # trust = [trustworthiness(X, xy, n_neighbors=int(k)) for k in neighbors]
 # print(f"Trustworthiness for neighbors {neighbors} : {trust}")
@@ -301,8 +332,8 @@ axs[0][0].scatter(
     s=40 / math.log10(num_points),
     alpha=0.7,
 )
-axs[0][0].set_title("UMAP")
-axs[0][0].set_ylabel("embeddings: ", rotation=0, size="large")
+axs[0][0].set_title(f"UMAP nnp: {NNP_UMAP}")
+axs[0][0].set_ylabel("embeddings: ", size="large")
 
 
 axs[0][1].scatter(
@@ -312,7 +343,7 @@ axs[0][1].scatter(
     s=40 / math.log10(num_points),
     alpha=0.7,
 )
-axs[0][1].set_title("nptsne")
+axs[0][1].set_title(f"nptsne nnp: {NNP_NPTSNE}")
 
 
 axs[0][2].scatter(
@@ -338,9 +369,9 @@ axs[0][2].legend(
     prop={"size": 8},
 )
 
-axs[0][2].set_title("HDILib VK")
+axs[0][2].set_title(f"HDILib VK nnp: {NNP_VK}")
 
-axs[1][0].set_ylabel("KL-div: ", rotation=0, size="large")
+axs[1][0].set_ylabel("KL-div: ", size="large")
 axs[1][1].plot(range(0, num_iterations), nptsne_klvalues)
 axs[1][2].plot(range(0, num_iterations), klvalues)
 
@@ -348,17 +379,6 @@ fig.tight_layout()
 # can linit range to range(1,perplexity) but using definition from
 
 # print(f"Area Under RNX Curve: {rnx_auc_crm(QNX)}")
-# print(f"NNP value 2: {neighborhood_preservation(X, xy, nr_neighbors=90)}") approx same as area under RNX curve
-# print(
-#     "NNP value UMAP:"
-#     f" {neighborhood_preservation(embed=UMAPembedding, X=X, nr_neighbors=90)}"
-# )
-# print(
-#     "NNP value nptsne:"
-#     f" {neighborhood_preservation(embed=embed_nptsne, X=X, nr_neighbors=90)}"
-# )
-# print(f"NNP value VK: {neighborhood_preservation(embed=xy, X=X, nr_neighbors=90)}")
-
 
 plt.show()
 input("Press enter to finish...")
