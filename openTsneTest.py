@@ -1,7 +1,7 @@
-from data_sources import get_generated, get_MNIST, get_mouse_Zheng
+from utils.data_sources import get_generated, get_MNIST, get_mouse_Zheng
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from prob_utils import (
+from utils.prob_utils import (
     compute_annoy_probabilities,
     euclidian_sqrdistance_matrix,
     compute_perplexity_probs_numba,

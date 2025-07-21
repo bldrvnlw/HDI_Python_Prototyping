@@ -16,7 +16,7 @@ import umap
 from nptsne import TextureTsne, KnnAlgorithm
 
 # from openTSNE import affinity
-from prob_utils import (
+from utils.prob_utils import (
     compute_annoy_distances,
     compute_hnsw_distances,
     euclidian_sqrdistance_matrix,
@@ -28,13 +28,13 @@ from prob_utils import (
     compute_Qnorm_cuda,
 )
 
-from metrics import compute_coranking_matrix, rnx_auc_crm
+from utils.metrics import compute_coranking_matrix, rnx_auc_crm
 
-from nnp_util import (
+from utils.nnp_util import (
     compute_nnp,
     neighborhood_preservation_torch,
     neighborhood_hit_torch,
-    get_shepard_and_stress,
+    get_spearman_and_stress,
 )
 
 from shaders.persistent_tensors import (
@@ -43,7 +43,7 @@ from shaders.persistent_tensors import (
     ShaderBuffers,
 )
 
-from data_sources import (
+from utils.data_sources import (
     get_generated,
     get_MNIST,
     get_mouse_Zheng,
@@ -300,26 +300,26 @@ NHIT_VK = neighborhood_hit_torch(xy, int_labels, nr_neighbors=90)
 NHIT_UMAP = neighborhood_hit_torch(UMAPembedding, int_labels, nr_neighbors=90)
 NHIT_NPTSNE = neighborhood_hit_torch(embed_nptsne, int_labels, nr_neighbors=90)
 
-SHEPHARD_VK, STRESS_VK = get_shepard_and_stress(X, xy)
-SHEPHARD_UMAP, STRESS_UMAP = get_shepard_and_stress(X, UMAPembedding)
-SHEPHARD_NPTSNE, STRESS_NPTSNE = get_shepard_and_stress(X, embed_nptsne)
+SPEARMANR_VK, STRESS_VK = get_spearman_and_stress(X, xy)
+SPEARMANR_UMAP, STRESS_UMAP = get_spearman_and_stress(X, UMAPembedding)
+SPEARMANR_NPTSNE, STRESS_NPTSNE = get_spearman_and_stress(X, embed_nptsne)
 
 print(f"NNP value VK: {NNP_VK}")  # approx same as area under RNX curve
 print(f"NHIT value VK: {NHIT_VK}")
-print(f"SHEPHARD value VK: {SHEPHARD_VK}")
+print(f"SPEARMAN-R value VK: {SPEARMANR_VK}")
 print(f"STRESS value VK: {STRESS_VK}")
 print(f"NNP value UMAP: {NNP_UMAP}")
 print(f"NHIT value UMAP: {NHIT_UMAP}")
-print(f"SHEPHARD value UMAP: {SHEPHARD_UMAP}")
+print(f"SPEARMAN-R value UMAP: {SPEARMANR_UMAP}")
 print(f"STRESS value UMAP: {STRESS_UMAP}")
 print(f"NNP value nptsne: {NNP_NPTSNE}")
 print(f"NHIT value nptsne: {NHIT_NPTSNE}")
-print(f"SHEPHARD value nptsne: {SHEPHARD_NPTSNE}")
+print(f"SPEARMAN-R value nptsne: {SPEARMANR_NPTSNE}")
 print(f"STRESS value nptsne: {STRESS_NPTSNE}")
 
-# neighbors = [int(perplexity / 2), perplexity, perplexity * 2, perplexity * 4]
-# trust = [trustworthiness(X, xy, n_neighbors=int(k)) for k in neighbors]
-# print(f"Trustworthiness for neighbors {neighbors} : {trust}")
+neighbors = [int(perplexity / 3), perplexity, perplexity * 3, perplexity * 9]
+trust = [trustworthiness(X, xy, n_neighbors=int(k)) for k in neighbors]
+print(f"Trustworthiness VK for neighbors {neighbors} : {trust}")
 
 # QNX = compute_coranking_matrix(data_ld=xy, data_hd=X)
 

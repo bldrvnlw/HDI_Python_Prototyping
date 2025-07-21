@@ -183,6 +183,10 @@ def neighborhood_preservation_torch(X, embed, nr_neighbors=30, metric="euclidean
     # scores = compute_neigh_preservation(indexes_high, indexes_low, nr_neighbors)
     return np.mean(scores)
 
+def trustworthiness: float(X, embed, nr_neighbors=30, metric="euclidean"):
+
+
+
 
 def metric_stress(D_high, D_low):
     return math.sqrt(np.sum(((D_high - D_low) ** 2) / np.sum(D_high**2)))
@@ -190,6 +194,7 @@ def metric_stress(D_high, D_low):
 
 def metric_shepard_diagram_correlation(D_high, D_low):
     """Calculate Shepard Goodness.
+    This is the not the shepard u the Spearman Rho (ranked) coefficient
 
     Args:
         D_high (np.ndarray): pairwise distances between high dimensional data
@@ -201,20 +206,73 @@ def metric_shepard_diagram_correlation(D_high, D_low):
     return stats.spearmanr(D_high, D_low)[0]
 
 
-def spearmanr_torch(x, y):
+def rankdata_average_fast(x: torch.Tensor) -> torch.Tensor:
+    """
+    Fast average-ranking with ties, like scipy.stats.rankdata(..., method='average')
+    Works on 1D tensors. Output is 0-based ranks.
+    """
+    x = x.float()
+    N = x.shape[0]
+
+    # Step 1: sort x and get sorted indices
+    sort_idx = torch.argsort(x)
+    sorted_x = x[sort_idx]
+
+    # Step 2: assign provisional ranks (0-based :  0 - N-1)
+    ranks = torch.arange(N, dtype=torch.float32, device=x.device)
+
+    # Step 3: find run boundaries (where values change)
+    diffs = torch.diff(sorted_x, prepend=sorted_x[:1] - 1)
+    group_starts = (diffs != 0).cumsum(dim=0) - 1  # group ID per element
+
+    # Step 4: compute mean rank per group (segment mean)
+    group_ids = group_starts  # shape: (N,)
+    num_groups = group_ids.max().item() + 1
+
+    # Sum of ranks per group
+    rank_sums = torch.zeros(num_groups, device=x.device).scatter_add(
+        0, group_ids, ranks
+    )
+    counts = torch.bincount(group_ids, minlength=num_groups).float()
+    group_means = rank_sums / counts  # shape: (num_groups,)
+
+    # Step 5: assign mean ranks to elements
+    avg_ranks = group_means[group_ids]  # shape: (N,)
+
+    # Step 6: undo the sorting
+    unsort_idx = torch.argsort(sort_idx)
+    return avg_ranks[unsort_idx]
+
+
+def spearmanr_torch(x: torch.tensor, y: torch.tensor) -> torch.tensor:
+    """A pytorch implementation of the Spearman rank correlation.
+
+    The Spearman correlation is the Pearson correlation
+    calculated on ranks rather then actual values. This makes
+    it less sensitive to outliers and focuses less on
+    actual distances in the low dimensional space which
+    are not preserved by tSNE. Result varies beween:
+        -1 - perfect anti-correlation
+        1  - perfect correlation
+
+    Based on the scipy implementation
+    https://github.com/scipy/scipy/blob/4d3dcc103612a2edaec7069638b7f8d0d75cab8b/scipy/stats/_stats_py.py#L5181
+
+    Args:
+        x (torch.tensor): pairwise distances high dimensional data
+        y (torch.tensor): pairwise distances low dimensional data
+
+    Returns:
+        torch.tensor: torch.tensor
+    """
     assert x.shape == y.shape
     x = x.float()
     y = y.float()
 
-    # Rank data (argsort twice trick)
-    def rank(data):
-        tmp = data.argsort()
-        ranks = torch.zeros_like(tmp, dtype=torch.float32)
-        ranks[tmp] = torch.arange(len(data), dtype=torch.float32, device=data.device)
-        return ranks
-
-    rx = rank(x)
-    ry = rank(y)
+    rx = rankdata_average_fast(x)
+    print(rx)
+    ry = rankdata_average_fast(y)
+    print(ry)
 
     # Pearson correlation of ranks
     rx_mean = rx.mean()
@@ -235,7 +293,7 @@ def pairwise_l2_distances(x):
     return dists / dists.max()
 
 
-def get_shepard_and_stress(hd_X, ld_X):
+def get_spearman_and_stress(hd_X, ld_X):
     D_hd = pairwise_l2_distances(torch.tensor(hd_X, device="cuda", dtype=torch.float32))
     D_ld = pairwise_l2_distances(torch.tensor(ld_X, device="cuda", dtype=torch.float32))
     shepard = spearmanr_torch(D_hd, D_ld)
