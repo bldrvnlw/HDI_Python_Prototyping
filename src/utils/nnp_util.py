@@ -6,6 +6,10 @@ from scipy import stats
 from numba import njit, prange
 import torch
 import math
+from optimize.nn_points_torch import NNPointsTorch
+from utils.base import (
+    knn_brute_force,
+)
 
 # === Config ===
 K = 15  # Max neighborhood size to evaluate
@@ -149,17 +153,9 @@ def compute_neigh_preservation(indexes_high, indexes_low, nr_neighbors):
     return scores
 
 
-# up to 100K rows depending on GPU memory
-def knn_brute_force(Xnp, k):
-    # x: (N, D), on GPU
-    x = torch.tensor(Xnp, device="cuda", dtype=torch.float32)
-    x_norm = (x**2).sum(dim=1).view(-1, 1)  # (N, 1)
-    dist = x_norm + x_norm.t() - 2.0 * x @ x.t()  # (N, N)
-    indices = dist.topk(k=k + 1, largest=False).indices[:, 1:]  # Skip self (distance 0)
-    return indices
-
-
-def neighborhood_preservation_torch(X, embed, nr_neighbors=30, metric="euclidean"):
+def neighborhood_preservation_torch(
+    X: NNPointsTorch, embed: NNPointsTorch, nr_neighbors=30, metric="euclidean"
+):
     """Compare nearest neighbours between the two data sets
     Metric is hardcoded as euclidean.
 
@@ -171,11 +167,11 @@ def neighborhood_preservation_torch(X, embed, nr_neighbors=30, metric="euclidean
     Returns:
         float: neighbourhood preservation metric. Range: 0 - 1
     """
-    indexes_high = knn_brute_force(X, nr_neighbors)
+    indexes_high = X.getNN(nr_neighbors)
     # dists_high, indexes_high = KDTree(X, leaf_size=2, metric=metric).query(
     #    X, k=nr_neighbors
     # )
-    indexes_low = knn_brute_force(embed, nr_neighbors)
+    indexes_low = embed.getNN(nr_neighbors)
     # dists_low, indexes_low = KDTree(embed, leaf_size=2, metric=metric).query(
     #    embed, k=nr_neighbors
     # )
@@ -183,13 +179,15 @@ def neighborhood_preservation_torch(X, embed, nr_neighbors=30, metric="euclidean
     # scores = compute_neigh_preservation(indexes_high, indexes_low, nr_neighbors)
     return np.mean(scores)
 
-def trustworthiness: float(X, embed, nr_neighbors=30, metric="euclidean"):
-
-
-
 
 def metric_stress(D_high, D_low):
     return math.sqrt(np.sum(((D_high - D_low) ** 2) / np.sum(D_high**2)))
+
+
+def metric_stress_torch(D_high: NNPointsTorch, D_low: NNPointsTorch):
+    return math.sqrt(
+        torch.sum(((D_high.tensor - D_low.tensor) ** 2) / torch.sum(D_high.tensor**2))
+    )
 
 
 def metric_shepard_diagram_correlation(D_high, D_low):
@@ -206,45 +204,7 @@ def metric_shepard_diagram_correlation(D_high, D_low):
     return stats.spearmanr(D_high, D_low)[0]
 
 
-def rankdata_average_fast(x: torch.Tensor) -> torch.Tensor:
-    """
-    Fast average-ranking with ties, like scipy.stats.rankdata(..., method='average')
-    Works on 1D tensors. Output is 0-based ranks.
-    """
-    x = x.float()
-    N = x.shape[0]
-
-    # Step 1: sort x and get sorted indices
-    sort_idx = torch.argsort(x)
-    sorted_x = x[sort_idx]
-
-    # Step 2: assign provisional ranks (0-based :  0 - N-1)
-    ranks = torch.arange(N, dtype=torch.float32, device=x.device)
-
-    # Step 3: find run boundaries (where values change)
-    diffs = torch.diff(sorted_x, prepend=sorted_x[:1] - 1)
-    group_starts = (diffs != 0).cumsum(dim=0) - 1  # group ID per element
-
-    # Step 4: compute mean rank per group (segment mean)
-    group_ids = group_starts  # shape: (N,)
-    num_groups = group_ids.max().item() + 1
-
-    # Sum of ranks per group
-    rank_sums = torch.zeros(num_groups, device=x.device).scatter_add(
-        0, group_ids, ranks
-    )
-    counts = torch.bincount(group_ids, minlength=num_groups).float()
-    group_means = rank_sums / counts  # shape: (num_groups,)
-
-    # Step 5: assign mean ranks to elements
-    avg_ranks = group_means[group_ids]  # shape: (N,)
-
-    # Step 6: undo the sorting
-    unsort_idx = torch.argsort(sort_idx)
-    return avg_ranks[unsort_idx]
-
-
-def spearmanr_torch(x: torch.tensor, y: torch.tensor) -> torch.tensor:
+def spearmanr_torch(x: NNPointsTorch, y: NNPointsTorch) -> torch.tensor:
     """A pytorch implementation of the Spearman rank correlation.
 
     The Spearman correlation is the Pearson correlation
@@ -259,19 +219,17 @@ def spearmanr_torch(x: torch.tensor, y: torch.tensor) -> torch.tensor:
     https://github.com/scipy/scipy/blob/4d3dcc103612a2edaec7069638b7f8d0d75cab8b/scipy/stats/_stats_py.py#L5181
 
     Args:
-        x (torch.tensor): pairwise distances high dimensional data
-        y (torch.tensor): pairwise distances low dimensional data
+        x (NNPointsTorch): optimized points containing pairwise distances high dimensional data
+        y (NNPointsTorch): optimized points containing pairwise distances low dimensional data
 
     Returns:
         torch.tensor: torch.tensor
     """
-    assert x.shape == y.shape
-    x = x.float()
-    y = y.float()
+    # assert x.pointData.shape == y.pointData.shape
 
-    rx = rankdata_average_fast(x)
+    rx = x.get_rank()
     print(rx)
-    ry = rankdata_average_fast(y)
+    ry = y.get_rank()
     print(ry)
 
     # Pearson correlation of ranks
@@ -283,19 +241,41 @@ def spearmanr_torch(x: torch.tensor, y: torch.tensor) -> torch.tensor:
     return cov / (std_rx * std_ry + 1e-8)  # Add small epsilon to avoid divide-by-zero
 
 
-def pairwise_l2_distances(x):
-    # x: (N, D)
-    x_norm = (x**2).sum(dim=1).unsqueeze(1)  # (N, 1)
-    dist = x_norm + x_norm.t() - 2.0 * (x @ x.t())  # (N, N)
-    dist = torch.clamp(dist, min=0.0)  # avoid negative due to precision
-    dists = torch.sqrt(dist)
-    dists = dists[torch.triu_indices(dists.size(0), dists.size(1), offset=1).unbind(0)]
-    return dists / dists.max()
-
-
-def get_spearman_and_stress(hd_X, ld_X):
-    D_hd = pairwise_l2_distances(torch.tensor(hd_X, device="cuda", dtype=torch.float32))
-    D_ld = pairwise_l2_distances(torch.tensor(ld_X, device="cuda", dtype=torch.float32))
+def get_spearman_and_stress(D_hd: NNPointsTorch, D_ld: NNPointsTorch):
     shepard = spearmanr_torch(D_hd, D_ld)
-    stress = metric_stress(D_hd.cpu().numpy(), D_ld.cpu().numpy())
+    stress = metric_stress_torch(
+        D_hd,
+        D_ld,
+    )
     return shepard.cpu().numpy(), stress
+
+
+def trustworthiness_torch(
+    hd_X: NNPointsTorch, ld_X: NNPointsTorch, n_neighbors: int = 5
+) -> float:
+    # reimplement the trustworthiness in sklearn manifole _t_sne.py
+    # https://github.com/scikit-learn/scikit-learn/blob/c5497b7f7eacfaff061cf68e09bcd48aa93d4d6b/sklearn/manifold/_t_sne.py#L456
+
+    N = hd_X.pointData.shape[0]
+
+    dist_X = hd_X.get_pairwise_ls_dist_full()
+    dist_X.fill_diagonal_(torch.inf)
+    sortIndex_X = torch.argsort(dist_X)
+
+    embed_nn = ld_X.getNN(n_neighbors)
+
+    inverted_index = torch.zeros(N, N, device="cuda", dtype=torch.int)
+    ordered_index = torch.arange(N + 1, device="cuda", dtype=torch.int)
+    inverted_index[ordered_index[:-1].unsqueeze(1), sortIndex_X] = ordered_index[1:]
+    ranks = inverted_index[ordered_index[:-1, np.newaxis], embed_nn] - n_neighbors
+
+    t = torch.sum(ranks[ranks > 0])
+    t = 1.0 - t * (2.0 / (N * n_neighbors * (2.0 * N - 3.0 * n_neighbors - 1.0)))
+
+    return float(t)
+
+
+def continuity_torch(
+    hd_X: NNPointsTorch, ld_X: NNPointsTorch, n_neighbors: int = 5
+) -> float:
+    return trustworthiness_torch(ld_X, hd_X, n_neighbors)

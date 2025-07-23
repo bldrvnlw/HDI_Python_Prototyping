@@ -14,6 +14,7 @@ import numpy as np
 from kp import Manager
 import umap
 from nptsne import TextureTsne, KnnAlgorithm
+from optimize.nn_points_torch import NNPointsTorch
 
 # from openTSNE import affinity
 from utils.prob_utils import (
@@ -35,6 +36,8 @@ from utils.nnp_util import (
     neighborhood_preservation_torch,
     neighborhood_hit_torch,
     get_spearman_and_stress,
+    trustworthiness_torch,
+    continuity_torch,
 )
 
 from shaders.persistent_tensors import (
@@ -50,6 +53,9 @@ from utils.data_sources import (
     get_hypomap,
     get_xmas_tree,
 )
+
+from utils.base import pairwise_l2_distances
+
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
@@ -282,43 +288,74 @@ points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION)
 xy = points.reshape(num_points, 2)
 print(f"xy.shape {xy.shape}")
 
+tXY = NNPointsTorch(xy)
+tX = NNPointsTorch(xy)
+
 # perform UMAP
 reducer = umap.UMAP(n_neighbors=perplexity * perplexity_multiplier)
 UMAPembedding = reducer.fit_transform(X)
+tUMAPembedding = NNPointsTorch(UMAPembedding)
 # perform old nptsne
 tsne = TextureTsne(True, perplexity=30, knn_algorithm=KnnAlgorithm.HNSW)
 embed_nptsne = tsne.fit_transform(X)
 embed_nptsne = embed_nptsne.reshape(num_points, 2)
+tembed_nptsne = NNPointsTorch(embed_nptsne)
 nptsne_klvalues = tsne.kl_values
 
-NNP_VK = neighborhood_preservation_torch(X, xy, nr_neighbors=90)
-NNP_UMAP = neighborhood_preservation_torch(embed=UMAPembedding, X=X, nr_neighbors=90)
-NNP_NPTSNE = neighborhood_preservation_torch(embed=embed_nptsne, X=X, nr_neighbors=90)
+NNP_VK = neighborhood_preservation_torch(tX, tXY, nr_neighbors=90)
+NNP_UMAP = neighborhood_preservation_torch(embed=tUMAPembedding, X=tX, nr_neighbors=90)
+NNP_NPTSNE = neighborhood_preservation_torch(embed=tembed_nptsne, X=tX, nr_neighbors=90)
+
 
 int_labels = y.astype(np.int32)
 NHIT_VK = neighborhood_hit_torch(xy, int_labels, nr_neighbors=90)
 NHIT_UMAP = neighborhood_hit_torch(UMAPembedding, int_labels, nr_neighbors=90)
 NHIT_NPTSNE = neighborhood_hit_torch(embed_nptsne, int_labels, nr_neighbors=90)
 
-SPEARMANR_VK, STRESS_VK = get_spearman_and_stress(X, xy)
-SPEARMANR_UMAP, STRESS_UMAP = get_spearman_and_stress(X, UMAPembedding)
-SPEARMANR_NPTSNE, STRESS_NPTSNE = get_spearman_and_stress(X, embed_nptsne)
+tDX = NNPointsTorch(tX.get_pairwise_l2_distances().cpu().numpy())
+tDXY = NNPointsTorch(tXY.get_pairwise_l2_distances().cpu().numpy())
+tDUMAPembedding = NNPointsTorch(
+    tUMAPembedding.get_pairwise_l2_distances().cpu().numpy()
+)
+tDembed_nptsne = NNPointsTorch(tembed_nptsne.get_pairwise_l2_distances().cpu().numpy())
 
+SPEARMANR_VK, STRESS_VK = get_spearman_and_stress(tDX, tDXY)
+SPEARMANR_UMAP, STRESS_UMAP = get_spearman_and_stress(tDX, tDUMAPembedding)
+SPEARMANR_NPTSNE, STRESS_NPTSNE = get_spearman_and_stress(tDX, tDembed_nptsne)
+
+TRUST_VK = trustworthiness_torch(tX, tXY)
+TRUST_UMAP = trustworthiness_torch(tX, tUMAPembedding)
+TRUST_NPTSNE = trustworthiness_torch(tX, tembed_nptsne)
+
+CONT_VK = continuity_torch(tX, tXY)
+CONT_UMAP = continuity_torch(tX, tUMAPembedding)
+CONT_NPTSNE = continuity_torch(tX, tembed_nptsne)
+
+print("**************")
 print(f"NNP value VK: {NNP_VK}")  # approx same as area under RNX curve
 print(f"NHIT value VK: {NHIT_VK}")
 print(f"SPEARMAN-R value VK: {SPEARMANR_VK}")
 print(f"STRESS value VK: {STRESS_VK}")
+print(f"TRUSTWORTHINESS value VK: {TRUST_VK}")
+print(f"CONTINUITY value VK: {CONT_VK}")
+print("**************")
 print(f"NNP value UMAP: {NNP_UMAP}")
 print(f"NHIT value UMAP: {NHIT_UMAP}")
 print(f"SPEARMAN-R value UMAP: {SPEARMANR_UMAP}")
 print(f"STRESS value UMAP: {STRESS_UMAP}")
+print(f"TRUSTWORTHINESS value VK: {TRUST_UMAP}")
+print(f"CONTINUITY value VK: {CONT_UMAP}")
+print("**************")
 print(f"NNP value nptsne: {NNP_NPTSNE}")
 print(f"NHIT value nptsne: {NHIT_NPTSNE}")
 print(f"SPEARMAN-R value nptsne: {SPEARMANR_NPTSNE}")
 print(f"STRESS value nptsne: {STRESS_NPTSNE}")
+print(f"TRUSTWORTHINESS value VK: {TRUST_NPTSNE}")
+print(f"CONTINUITY value VK: {CONT_NPTSNE}")
+print("**************")
 
 neighbors = [int(perplexity / 3), perplexity, perplexity * 3, perplexity * 9]
-trust = [trustworthiness(X, xy, n_neighbors=int(k)) for k in neighbors]
+trust = [trustworthiness_torch(tX, tXY, n_neighbors=int(k)) for k in neighbors]
 print(f"Trustworthiness VK for neighbors {neighbors} : {trust}")
 
 # QNX = compute_coranking_matrix(data_ld=xy, data_hd=X)
