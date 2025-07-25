@@ -289,7 +289,7 @@ xy = points.reshape(num_points, 2)
 print(f"xy.shape {xy.shape}")
 
 tXY = NNPointsTorch(xy)
-tX = NNPointsTorch(xy)
+tX = NNPointsTorch(X)
 
 # perform UMAP
 reducer = umap.UMAP(n_neighbors=perplexity * perplexity_multiplier)
