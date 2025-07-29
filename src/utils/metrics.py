@@ -1,4 +1,8 @@
-# copied from https://timsainburg.com/coranking-matrix-python-numba.html
+# Contains some numba accellerated metrics fro DR
+
+# Copied from https://timsainburg.com/coranking-matrix-python-numba.html
+# Fast computation of a coranking matrix for dimensionality reduction
+# with python, joblib, and numba
 
 from sklearn.metrics import pairwise_distances, pairwise_distances_chunked
 from joblib import Parallel, delayed
@@ -80,6 +84,8 @@ def compute_coranking_matrix(data_ld, data_hd=None, D_hd=None):
 
 
 # Area under curve from coranking matrix
+# Code from https://github.com/ymlasu/CAMEL/blob/main/demo/eval_metrics.py
+# See https://doi.org/10.48550/arXiv.2403.14813
 
 
 @numba.njit(fastmath=True)
