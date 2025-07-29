@@ -122,3 +122,14 @@ def get_xmas_tree() -> Tuple[np.array, np.array, List[int], List[int]]:
     unique_colors = np.unique(colors)
     y = df["main_label"].to_list()
     return (X, y, colors, unique_colors)
+
+
+def get_wikiword_350000(
+    num_points: int,
+) -> Tuple[np.array, np.array, List[int], List[int]]:
+    data = np.load(r"D:\\Data\\ML\\wiki-news-300d-1M.vec\\vec350000.npy")
+    X = data[:num_points, ...]
+    y = None
+    colors = np.full(num_points, "#1F1B53")
+    unique_colors = np.unique(colors)
+    return (X, y, colors, unique_colors)
