@@ -16,8 +16,8 @@
   void main() {
     uint lid = gl_LocalInvocationIndex.x;
     uint groupSize = gl_WorkGroupSize.x;
-    vec2 minBound = vec2(1e38);//1.0 / 0.0); // inf
-    vec2 maxBound = vec2(-1e38);//-1.0 / 0.0); // -inf
+    vec2 minBound = vec2(1e38);  // inf
+    vec2 maxBound = vec2(-1e38);  // -inf
 
 
     
