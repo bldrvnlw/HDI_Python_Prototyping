@@ -15,6 +15,10 @@ from kp import Manager
 import umap
 from nptsne import TextureTsne, KnnAlgorithm
 from optimize.nn_points_torch import NNPointsTorch
+from itertools import chain
+
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # from openTSNE import affinity
 from utils.prob_utils import (
@@ -75,20 +79,33 @@ num_iterations = 1000  # was 1000
 # X, y, colors, unique_colors = get_xmas_tree()
 # num_points = X.shape[0]  # all in xmas_tree
 # perplexity = 15
+
+### Hypomap
 # perplexity = 90  # was 30
 # num_points = 50000  # was 433369
 # X, y, colors, unique_colors = get_hypomap(num_points=num_points)
-# num_points = 1306127  # all in Zheng 1306127
+
+### Zheng
+# perplexity = 30  # was 30
+# num_points = 130612  # all in Zheng 1306127
 # X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
+
+### MNIST
 perplexity = 30  # was 30
-num_points = 70000  # was 70000 all in MNIST
+num_points = 60000  # was 70000 all in MNIST
 X, y, colors, unique_colors = get_MNIST(num_points=num_points)
-# Wikiword
-# perplexity = 90  # was 30
-# num_points = 100000  # was 70000 all in MNIST
+
+### Wikiword
+# perplexity = 30  # was 30
+# num_points = 300000  # was
 # X, y, colors, unique_colors = get_wikiword_350000(num_points=num_points)
 
-metrics = False
+# Things to do
+metrics = False  # calculate the metrics
+reuse_nptsne_distributions = True  # Use the distrubutions from nptsne
+graphics_plotly = True
+
+
 knn_algorithm = "HNSW"  # Annoy or HNSW
 # randomly initialize the embedding
 points = get_random_uniform_circular_embedding(num_points, 0.1)
@@ -106,33 +123,31 @@ nptsne_klvalues = tsne.kl_values
 nptsne_probabilities = tsne.transition_matrix
 
 num_rows = len(nptsne_probabilities)
+distrib_matrix = None
 
-neigh_rows = []
-prob_rows = []
-nptsne_indices = np.zeros(num_rows * 2, dtype=int)
-offset = 0
-for pos, point_prob_tups in enumerate(nptsne_probabilities):
-    nptsne_neigh, nptsne_prob = zip(*point_prob_tups)
-    neigh_rows.append(nptsne_neigh)
-    prob_rows.append(nptsne_prob)
-    nptsne_indices[pos * 2] = offset
-    nptsne_indices[pos * 2 + 1] = len(nptsne_neigh)
-    offset += len(nptsne_neigh)
+if reuse_nptsne_distributions:
+    neigh_rows = []
+    prob_rows = []
+    nptsne_indices = np.zeros(num_rows * 2, dtype=int)
+    offset = 0
+    for pos, point_prob_tups in enumerate(nptsne_probabilities):
+        nptsne_neigh, nptsne_prob = zip(*point_prob_tups)
+        neigh_rows.append(nptsne_neigh)
+        prob_rows.append(nptsne_prob)
+        nptsne_indices[pos * 2] = offset
+        nptsne_indices[pos * 2 + 1] = len(nptsne_neigh)
+        offset += len(nptsne_neigh)
 
-nptsne_prob_np = np.array(prob_rows)
-nptsne_prob_np = nptsne_prob_np.flatten()
-nptsne_neigh_np = np.array(neigh_rows)
-nptsne_neigh_np = nptsne_neigh_np.flatten()
+    nptsne_prob_np = np.fromiter(chain.from_iterable(prob_rows), dtype=float)
+    nptsne_neigh_np = np.fromiter(chain.from_iterable(neigh_rows), dtype=int)
 
-prob_matrix = LinearProbabilityMatrix(
-    neighbours=nptsne_neigh_np,
-    probabilities=nptsne_prob_np,
-    indices=nptsne_indices,
-)
+    distrib_matrix = LinearProbabilityMatrix(
+        neighbours=nptsne_neigh_np,
+        probabilities=nptsne_prob_np,
+        indices=nptsne_indices,
+    )
 
-self_own_probs = True
-
-if self_own_probs:
+else:
     if knn_algorithm == "Annoy":
         print("Using Annoy")
         distances, neighbours, indices = compute_annoy_distances(
@@ -163,7 +178,7 @@ if self_own_probs:
     # Create a manager for the shaders
     # and persistent buffers
 
-    prob_matrix = LinearProbabilityMatrix(
+    distrib_matrix = LinearProbabilityMatrix(
         neighbours=neighbours,
         probabilities=probabilities,
         indices=indices,
@@ -173,7 +188,7 @@ if self_own_probs:
 mgr = Manager()
 # Create the persistent buffers
 persistent_tensors = PersistentTensors(
-    mgr=mgr, num_points=num_points, prob_matrix=prob_matrix
+    mgr=mgr, num_points=num_points, prob_matrix=distrib_matrix
 )
 
 
@@ -408,68 +423,129 @@ if metrics:
 
 # QNX = compute_coranking_matrix(data_ld=xy, data_hd=X)
 
-fig, axs = plt.subplots(figsize=(20, 20), nrows=2, ncols=3)
 
-axs[0][0].scatter(
-    UMAPembedding[:, 0],
-    UMAPembedding[:, 1],
-    c=colors,
-    s=10 / math.log10(num_points),
-    alpha=0.5,
-)
+if graphics_plotly:
+    alpha = 1 / math.log10(num_points)
+    size = 5 / math.log10(num_points)
+    import plotly.io as pio
+    import holoviews as hv
+    from holoviews.operation.datashader import datashade, dynspread
+    import datashader as ds
+    import datashader.transfer_functions as tf
+    from datashader.mpl_ext import dsshow, alpha_colormap
+    import pandas as pd
+    from mpl_toolkits.axes_grid1 import ImageGrid, Grid
+    from functools import partial
+    import panel as pn
 
-if metrics:
-    axs[0][0].set_title(f"UMAP nnp: {NNP_UMAP}")
-axs[0][0].set_ylabel("embeddings: ", size="large")
+    hv.extension("bokeh")
+    pn.extension()
 
+    dynspread.max_px = 15
+    dynspread.threshold = 0.5
 
-axs[0][1].scatter(
-    embed_nptsne[:, 0],
-    embed_nptsne[:, 1],
-    c=colors,
-    s=10 / math.log10(num_points),
-    alpha=0.5,
-)
-if metrics:
-    axs[0][1].set_title(f"nptsne nnp: {NNP_NPTSNE}")
+    # pio.renderers.default = "png"
 
+    alpha = 1 / math.log10(num_points)
+    size = 10 / math.log10(num_points)
+    # ax = make_subplots(rows=1, cols=3, subplot_titles=("UMAP", "nptsne", "vulkan"))
+    # fig, axs = plt.subplots(nrows=1, ncols=3)
+    df1 = pd.DataFrame(dict(x=UMAPembedding[:, 0], y=UMAPembedding[:, 1]))
+    df2 = pd.DataFrame(dict(x=embed_nptsne[:, 0], y=embed_nptsne[:, 1]))
+    df3 = pd.DataFrame(dict(x=xy[:, 0], y=xy[:, 1]))
+    pw = 600
+    ph = 600
+    scatter1 = hv.Points(df1, label="umap")
+    scatter2 = hv.Points(df2, label="nptsne")
+    scatter3 = hv.Points(df3, label="vulkan")
 
-axs[0][2].scatter(
-    xy[:, 0], xy[:, 1], c=colors, s=10 / math.log10(num_points), alpha=0.5
-)
-
-custom = [
-    Line2D(
-        [],
-        [],
-        marker=".",
-        markersize=8.0,
-        color=unique_colors[i],
-        linestyle="None",
+    sct1 = dynspread(
+        datashade(scatter1, cmap="Purples").opts(
+            width=pw,
+            height=ph,
+        )
     )
-    for i in range(0, len(unique_colors))
-]
-axs[0][2].legend(
-    custom,
-    [x for x in range(0, len(unique_colors))],
-    loc="lower left",
-    title="Cluster",
-    prop={"size": 8},
-)
+    sct2 = dynspread(
+        datashade(scatter2, cmap="Purples").opts(
+            width=pw,
+            height=ph,
+        )
+    )
+    sct3 = dynspread(
+        datashade(scatter3, cmap="Purples").opts(
+            width=pw,
+            height=ph,
+        )
+    )
 
-if metrics:
-    axs[0][2].set_title(f"HDILib VK nnp: {NNP_VK}")
+    composition = (sct1 + sct2 + sct3).opts(shared_axes=False)
+    # pn.panel(composition).servable()
+    pn.panel(composition).show()
+    # hv.save(composition, "bigdata.html")
+    # fig.write_image("plot.png")
+    # fig.show()
 
-axs[1][0].set_ylabel("KL-div: ", size="large")
-axs[1][1].plot(range(0, num_iterations), nptsne_klvalues)
-axs[1][2].plot(range(0, num_iterations), klvalues)
+else:
+    alpha = 1 / math.log10(num_points)
+    size = 5 / math.log10(num_points)
+    fig, axs = plt.subplots(figsize=(20, 20), nrows=2, ncols=3)
 
-fig.tight_layout()
-# can linit range to range(1,perplexity) but using definition from
+    axs[0][0].scatter(
+        UMAPembedding[:, 0],
+        UMAPembedding[:, 1],
+        c=colors,
+        s=size,
+        alpha=alpha,
+    )
 
-# print(f"Area Under RNX Curve: {rnx_auc_crm(QNX)}")
+    if metrics:
+        axs[0][0].set_title(f"UMAP nnp: {NNP_UMAP}")
+    axs[0][0].set_ylabel("embeddings: ", size="large")
 
-plt.show()
+    axs[0][1].scatter(
+        embed_nptsne[:, 0],
+        embed_nptsne[:, 1],
+        c=colors,
+        s=size,
+        alpha=alpha,
+    )
+    if metrics:
+        axs[0][1].set_title(f"nptsne nnp: {NNP_NPTSNE}")
+
+    axs[0][2].scatter(xy[:, 0], xy[:, 1], c=colors, s=size, alpha=alpha)
+
+    custom = [
+        Line2D(
+            [],
+            [],
+            marker=".",
+            markersize=8.0,
+            color=unique_colors[i],
+            linestyle="None",
+        )
+        for i in range(0, len(unique_colors))
+    ]
+    axs[0][2].legend(
+        custom,
+        [x for x in range(0, len(unique_colors))],
+        loc="lower left",
+        title="Cluster",
+        prop={"size": 8},
+    )
+
+    if metrics:
+        axs[0][2].set_title(f"HDILib VK nnp: {NNP_VK}")
+
+    axs[1][0].set_ylabel("KL-div: ", size="large")
+    axs[1][1].plot(range(0, num_iterations), nptsne_klvalues)
+    axs[1][2].plot(range(0, num_iterations), klvalues)
+
+    fig.tight_layout()
+    # can linit range to range(1,perplexity) but using definition from
+
+    # print(f"Area Under RNX Curve: {rnx_auc_crm(QNX)}")
+
+    plt.show()
 input("Press enter to finish...")
 mgr.destroy()
 print("Iterations complete")
