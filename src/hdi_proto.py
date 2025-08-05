@@ -81,29 +81,30 @@ num_iterations = 1000  # was 1000
 # perplexity = 15
 
 ### Hypomap
-# perplexity = 90  # was 30
-# num_points = 50000  # was 433369
-# X, y, colors, unique_colors = get_hypomap(num_points=num_points)
+# perplexity = 50  # was 30
+# num_points = 433369  # was 433369
+# data = get_hypomap(num_points=num_points)
 
 ### Zheng
 # perplexity = 30  # was 30
-# num_points = 130612  # all in Zheng 1306127
-# X, y, colors, unique_colors = get_mouse_Zheng(num_points=num_points)
+# num_points = 1306127  # all in Zheng 1306127
+# data = get_mouse_Zheng(num_points=num_points)
 
 ### MNIST
-perplexity = 30  # was 30
-num_points = 60000  # was 70000 all in MNIST
-X, y, colors, unique_colors = get_MNIST(num_points=num_points)
+# perplexity = 30  # was 30
+# num_points = 60000  # was 70000 all in MNIST
+# data = get_MNIST(num_points=num_points)
 
 ### Wikiword
-# perplexity = 30  # was 30
-# num_points = 300000  # was
-# X, y, colors, unique_colors = get_wikiword_350000(num_points=num_points)
+perplexity = 30  # was 30
+num_points = 350000  # was
+data = get_wikiword_350000(num_points=num_points)
 
+X = data["X"]
 # Things to do
 metrics = False  # calculate the metrics
 reuse_nptsne_distributions = True  # Use the distrubutions from nptsne
-graphics_plotly = True
+graphics_hv = True  # Display plots using HoloViews + datashader
 
 
 knn_algorithm = "HNSW"  # Annoy or HNSW
@@ -199,7 +200,7 @@ end_exaggeration = 1.0
 decay_start = 250  # was 250
 decay_length = 150  # was 201500
 
-klvalues = np.zeros((num_iterations,))
+vulkan_klvalues = np.zeros((num_iterations,))
 
 # plt.figure(0)
 # plt.scatter(points[:, 0], points[:, 1], c=colors, alpha=0.7)
@@ -288,7 +289,7 @@ for i in range(num_iterations):
         exaggeration=exaggeration,
         persistent_tensors=persistent_tensors,
     )
-    klvalues[i] = sum_kl
+    vulkan_klvalues[i] = sum_kl
     print(f"Iteration {i} Sum KL {sum_kl} ")
     if i % 1 == 0:
         pass
@@ -363,6 +364,7 @@ if metrics:
         embed=tembed_nptsne, X=tX, nr_neighbors=90
     )
 
+    y = data["y"]
     if y is not None:
         int_labels = y.astype(np.int32)
         NHIT_VK = neighborhood_hit_torch(xy, int_labels, nr_neighbors=90)
@@ -424,11 +426,12 @@ if metrics:
 # QNX = compute_coranking_matrix(data_ld=xy, data_hd=X)
 
 
-if graphics_plotly:
+if graphics_hv:
     alpha = 1 / math.log10(num_points)
     size = 5 / math.log10(num_points)
     import plotly.io as pio
     import holoviews as hv
+    from holoviews import opts
     from holoviews.operation.datashader import datashade, dynspread
     import datashader as ds
     import datashader.transfer_functions as tf
@@ -450,102 +453,76 @@ if graphics_plotly:
     size = 10 / math.log10(num_points)
     # ax = make_subplots(rows=1, cols=3, subplot_titles=("UMAP", "nptsne", "vulkan"))
     # fig, axs = plt.subplots(nrows=1, ncols=3)
-    df1 = pd.DataFrame(dict(x=UMAPembedding[:, 0], y=UMAPembedding[:, 1]))
-    df2 = pd.DataFrame(dict(x=embed_nptsne[:, 0], y=embed_nptsne[:, 1]))
-    df3 = pd.DataFrame(dict(x=xy[:, 0], y=xy[:, 1]))
+    # dataframes comprise the x and y coords and the labels
+    df1 = pd.DataFrame(
+        dict(xe=UMAPembedding[:, 0], ye=UMAPembedding[:, 1], label=data["label"])
+    )
+    df2 = pd.DataFrame(
+        dict(xe=embed_nptsne[:, 0], ye=embed_nptsne[:, 1], label=data["label"])
+    )
+    df3 = pd.DataFrame(dict(xe=xy[:, 0], ye=xy[:, 1], label=data["label"]))
     pw = 600
     ph = 600
-    scatter1 = hv.Points(df1, label="umap")
-    scatter2 = hv.Points(df2, label="nptsne")
-    scatter3 = hv.Points(df3, label="vulkan")
 
+    overlay1 = hv.NdOverlay(
+        {
+            label: hv.Points(group, kdims=["xe", "ye"], label="umap")
+            for label, group in df1.groupby("label")
+        }
+    )
     sct1 = dynspread(
-        datashade(scatter1, cmap="Purples").opts(
+        datashade(overlay1, aggregator="count_cat", color_key=data["col_key"]).opts(
             width=pw,
             height=ph,
         )
+    )
+    # print(f"overlay keys: {overlay1.keys()}")
+    # print(f"color key keys: {data["col_key"].keys()}")
+
+    overlay2 = hv.NdOverlay(
+        {
+            label: hv.Points(group, kdims=["xe", "ye"], label="nptsne")
+            for label, group in df2.groupby("label")
+        }
     )
     sct2 = dynspread(
-        datashade(scatter2, cmap="Purples").opts(
+        datashade(overlay2, aggregator="count_cat", color_key=data["col_key"]).opts(
             width=pw,
             height=ph,
         )
+    )
+
+    overlay3 = hv.NdOverlay(
+        {
+            label: hv.Points(group, kdims=["xe", "ye"], label="vulkan")
+            for label, group in df3.groupby("label")
+        }
     )
     sct3 = dynspread(
-        datashade(scatter3, cmap="Purples").opts(
+        datashade(overlay3, aggregator="count_cat", color_key=data["col_key"]).opts(
             width=pw,
             height=ph,
         )
     )
 
-    composition = (sct1 + sct2 + sct3).opts(shared_axes=False)
-    # pn.panel(composition).servable()
+    empty_umap = hv.Text(0.5, 0.5, "No KL curve for umap").opts(
+        width=pw, height=ph, xaxis=None, yaxis=None, bgcolor="white"
+    )
+
+    nptsne_kl_points = [(i, nptsne_klvalues[i]) for i in range(num_iterations)]
+    nptsne_kl_curve = hv.Curve(nptsne_kl_points).opts(width=pw, height=ph)
+
+    vulkan_kl_points = [(i, vulkan_klvalues[i]) for i in range(num_iterations)]
+    vulkan_kl_curve = hv.Curve(vulkan_kl_points).opts(width=pw, height=ph)
+
+    composition = (
+        (sct1 + sct2 + sct3 + empty_umap + nptsne_kl_curve + vulkan_kl_curve)
+        .opts(shared_axes=False)
+        .cols(3)
+    )
     pn.panel(composition).show()
-    # hv.save(composition, "bigdata.html")
-    # fig.write_image("plot.png")
-    # fig.show()
 
-else:
-    alpha = 1 / math.log10(num_points)
-    size = 5 / math.log10(num_points)
-    fig, axs = plt.subplots(figsize=(20, 20), nrows=2, ncols=3)
 
-    axs[0][0].scatter(
-        UMAPembedding[:, 0],
-        UMAPembedding[:, 1],
-        c=colors,
-        s=size,
-        alpha=alpha,
-    )
-
-    if metrics:
-        axs[0][0].set_title(f"UMAP nnp: {NNP_UMAP}")
-    axs[0][0].set_ylabel("embeddings: ", size="large")
-
-    axs[0][1].scatter(
-        embed_nptsne[:, 0],
-        embed_nptsne[:, 1],
-        c=colors,
-        s=size,
-        alpha=alpha,
-    )
-    if metrics:
-        axs[0][1].set_title(f"nptsne nnp: {NNP_NPTSNE}")
-
-    axs[0][2].scatter(xy[:, 0], xy[:, 1], c=colors, s=size, alpha=alpha)
-
-    custom = [
-        Line2D(
-            [],
-            [],
-            marker=".",
-            markersize=8.0,
-            color=unique_colors[i],
-            linestyle="None",
-        )
-        for i in range(0, len(unique_colors))
-    ]
-    axs[0][2].legend(
-        custom,
-        [x for x in range(0, len(unique_colors))],
-        loc="lower left",
-        title="Cluster",
-        prop={"size": 8},
-    )
-
-    if metrics:
-        axs[0][2].set_title(f"HDILib VK nnp: {NNP_VK}")
-
-    axs[1][0].set_ylabel("KL-div: ", size="large")
-    axs[1][1].plot(range(0, num_iterations), nptsne_klvalues)
-    axs[1][2].plot(range(0, num_iterations), klvalues)
-
-    fig.tight_layout()
-    # can linit range to range(1,perplexity) but using definition from
-
-    # print(f"Area Under RNX Curve: {rnx_auc_crm(QNX)}")
-
-    plt.show()
 input("Press enter to finish...")
 mgr.destroy()
 print("Iterations complete")
