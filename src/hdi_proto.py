@@ -96,8 +96,8 @@ num_iterations = 1000  # was 1000
 # data = get_MNIST(num_points=num_points)
 
 ### Wikiword
-perplexity = 30  # was 30
-num_points = 350000  # was
+perplexity = 50  # was 50
+num_points = 350000  # was 350000
 data = get_wikiword_350000(num_points=num_points)
 
 X = data["X"]
@@ -451,6 +451,7 @@ if graphics_hv:
 
     alpha = 1 / math.log10(num_points)
     size = 10 / math.log10(num_points)
+    no_categories = len(data["col_key"])
     # ax = make_subplots(rows=1, cols=3, subplot_titles=("UMAP", "nptsne", "vulkan"))
     # fig, axs = plt.subplots(nrows=1, ncols=3)
     # dataframes comprise the x and y coords and the labels
@@ -461,48 +462,71 @@ if graphics_hv:
         dict(xe=embed_nptsne[:, 0], ye=embed_nptsne[:, 1], label=data["label"])
     )
     df3 = pd.DataFrame(dict(xe=xy[:, 0], ye=xy[:, 1], label=data["label"]))
+
+    # print(df1["label"].unique())
+    # print(df2["label"].unique())
+    # print(df3["label"].unique())
+    # print(data["col_key"].keys())
+    # print(df1[["xe", "ye"]].isna().sum())
+    # print(df2[["xe", "ye"]].isna().sum())
+    # print(df3[["xe", "ye"]].isna().sum())
     pw = 600
     ph = 600
 
     overlay1 = hv.NdOverlay(
         {
-            label: hv.Points(group, kdims=["xe", "ye"], label="umap")
+            label: hv.Points(
+                group,
+                kdims=["xe", "ye"],
+                label="umap",
+            )
             for label, group in df1.groupby("label")
         }
     )
     sct1 = dynspread(
-        datashade(overlay1, aggregator="count_cat", color_key=data["col_key"]).opts(
-            width=pw,
-            height=ph,
-        )
+        datashade(
+            overlay1,
+            aggregator=ds.count() if no_categories else "count_cat",
+            color_key=data["col_key"],
+        ).opts(width=pw, height=ph)
     )
     # print(f"overlay keys: {overlay1.keys()}")
     # print(f"color key keys: {data["col_key"].keys()}")
 
     overlay2 = hv.NdOverlay(
         {
-            label: hv.Points(group, kdims=["xe", "ye"], label="nptsne")
+            label: hv.Points(
+                group,
+                kdims=["xe", "ye"],
+                label="nptsne",
+            )
             for label, group in df2.groupby("label")
         }
     )
     sct2 = dynspread(
-        datashade(overlay2, aggregator="count_cat", color_key=data["col_key"]).opts(
-            width=pw,
-            height=ph,
-        )
+        datashade(
+            overlay2,
+            aggregator=ds.count() if no_categories else "count_cat",
+            color_key=data["col_key"],
+        ).opts(width=pw, height=ph)
     )
 
     overlay3 = hv.NdOverlay(
         {
-            label: hv.Points(group, kdims=["xe", "ye"], label="vulkan")
+            label: hv.Points(
+                group,
+                kdims=["xe", "ye"],
+                label="vulkan",
+            )
             for label, group in df3.groupby("label")
         }
     )
     sct3 = dynspread(
-        datashade(overlay3, aggregator="count_cat", color_key=data["col_key"]).opts(
-            width=pw,
-            height=ph,
-        )
+        datashade(
+            overlay3,
+            aggregator=ds.count() if no_categories else "count_cat",
+            color_key=data["col_key"],
+        ).opts(width=pw, height=ph)
     )
 
     empty_umap = hv.Text(0.5, 0.5, "No KL curve for umap").opts(

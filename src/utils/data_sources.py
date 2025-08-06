@@ -142,7 +142,7 @@ def get_wikiword_350000(
 ) -> pd.DataFrame:
     data = np.load(r"D:\\Data\\ML\\wiki-news-300d-1M.vec\\vec350000.npy")
     X = data[:num_points, ...]
-    y = np.full((num_points), 0)
-    col_key = {0: "#1F1B53"}
+    y = ["w"] * num_points
+    col_key = {"w": "#210056"}
     # unique_colors = np.unique(colors)
     return {"X": X, "label": y, "col_key": col_key}
