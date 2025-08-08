@@ -57,6 +57,10 @@ from utils.data_sources import (
     get_hypomap,
     get_xmas_tree,
     get_wikiword_350000,
+    get_word2vec,
+    get_coil20,
+    get_frey_faces,
+    get_fashion,
 )
 
 from utils.base import pairwise_l2_distances
@@ -76,9 +80,11 @@ centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
 
 num_iterations = 1000  # was 1000
-# X, y, colors, unique_colors = get_xmas_tree()
-# num_points = X.shape[0]  # all in xmas_tree
-# perplexity = 15
+
+# data = get_xmas_tree()
+# num_points = data["X"].shape[0]  # all in xmas_tree
+# perplexity = 13
+# num_iterations = 500
 
 ### Hypomap
 # perplexity = 50  # was 30
@@ -96,9 +102,25 @@ num_iterations = 1000  # was 1000
 # data = get_MNIST(num_points=num_points)
 
 ### Wikiword
-perplexity = 50  # was 50
-num_points = 350000  # was 350000
-data = get_wikiword_350000(num_points=num_points)
+# perplexity = 50  # was 50
+# num_points = 350000  # was 350000
+# data = get_wikiword_350000(num_points=num_points)
+
+### Word2vec
+# perplexity = 80  # was
+# num_points = 1000000  # was 3000000
+# data = get_word2vec(num_points=num_points)
+
+# coil-20
+# perplexity = 30  # was 30
+# num_points = 1400  # was 1400
+# data = get_coil20(num_points=num_points)
+
+# frey_faces
+perplexity = 30  # was 30
+num_points = 1965  # was 1965
+data = get_frey_faces(num_points=num_points)
+get_fashion(num_points)
 
 X = data["X"]
 # Things to do
@@ -447,11 +469,22 @@ if graphics_hv:
     dynspread.max_px = 15
     dynspread.threshold = 0.5
 
+    # Sliders for dynspread parameters
+    point_size_slider = pn.widgets.IntSlider(
+        name="Point Size", start=1, end=20, value=5
+    )
+    max_px_slider = pn.widgets.IntSlider(
+        name="Max Spread (px)", start=1, end=20, value=5
+    )
+    threshold_slider = pn.widgets.FloatSlider(
+        name="Threshold", start=0.0, end=1.0, step=0.05, value=0.5
+    )
+
     # pio.renderers.default = "png"
 
     alpha = 1 / math.log10(num_points)
     size = 10 / math.log10(num_points)
-    no_categories = len(data["col_key"])
+    no_categories = len(data["col_key"]) == 1
     # ax = make_subplots(rows=1, cols=3, subplot_titles=("UMAP", "nptsne", "vulkan"))
     # fig, axs = plt.subplots(nrows=1, ncols=3)
     # dataframes comprise the x and y coords and the labels
@@ -473,78 +506,95 @@ if graphics_hv:
     pw = 600
     ph = 600
 
-    overlay1 = hv.NdOverlay(
-        {
-            label: hv.Points(
-                group,
-                kdims=["xe", "ye"],
-                label="umap",
-            )
-            for label, group in df1.groupby("label")
-        }
-    )
-    sct1 = dynspread(
-        datashade(
-            overlay1,
-            aggregator=ds.count() if no_categories else "count_cat",
-            color_key=data["col_key"],
-        ).opts(width=pw, height=ph)
-    )
-    # print(f"overlay keys: {overlay1.keys()}")
-    # print(f"color key keys: {data["col_key"].keys()}")
+    @pn.depends(point_size_slider, max_px_slider, threshold_slider)
+    def create_composition(point_size, max_px, threshold):
+        overlay1 = hv.NdOverlay(
+            {
+                label: hv.Points(
+                    group,
+                    kdims=["xe", "ye"],
+                    label="umap",
+                )
+                for label, group in df1.groupby("label")
+            }
+        )
+        sct1 = dynspread(
+            datashade(
+                overlay1,
+                aggregator=ds.count() if no_categories else "count_cat",
+                color_key=data["col_key"],
+                point_size=point_size,
+            ).opts(width=pw, height=ph),
+            max_px=max_px,
+            threshold=threshold,
+        )
+        # print(f"overlay keys: {overlay1.keys()}")
+        # print(f"color key keys: {data["col_key"].keys()}")
 
-    overlay2 = hv.NdOverlay(
-        {
-            label: hv.Points(
-                group,
-                kdims=["xe", "ye"],
-                label="nptsne",
-            )
-            for label, group in df2.groupby("label")
-        }
-    )
-    sct2 = dynspread(
-        datashade(
-            overlay2,
-            aggregator=ds.count() if no_categories else "count_cat",
-            color_key=data["col_key"],
-        ).opts(width=pw, height=ph)
-    )
+        overlay2 = hv.NdOverlay(
+            {
+                label: hv.Points(
+                    group,
+                    kdims=["xe", "ye"],
+                    label="nptsne",
+                )
+                for label, group in df2.groupby("label")
+            }
+        )
+        sct2 = dynspread(
+            datashade(
+                overlay2,
+                aggregator=ds.count() if no_categories else "count_cat",
+                color_key=data["col_key"],
+                point_size=point_size,
+            ).opts(width=pw, height=ph),
+            max_px=max_px,
+            threshold=threshold,
+        )
 
-    overlay3 = hv.NdOverlay(
-        {
-            label: hv.Points(
-                group,
-                kdims=["xe", "ye"],
-                label="vulkan",
-            )
-            for label, group in df3.groupby("label")
-        }
-    )
-    sct3 = dynspread(
-        datashade(
-            overlay3,
-            aggregator=ds.count() if no_categories else "count_cat",
-            color_key=data["col_key"],
-        ).opts(width=pw, height=ph)
-    )
+        overlay3 = hv.NdOverlay(
+            {
+                label: hv.Points(
+                    group,
+                    kdims=["xe", "ye"],
+                    label="vulkan",
+                )
+                for label, group in df3.groupby("label")
+            }
+        )
+        sct3 = dynspread(
+            datashade(
+                overlay3,
+                aggregator=ds.count() if no_categories else "count_cat",
+                color_key=data["col_key"],
+                point_size=point_size,
+            ).opts(width=pw, height=ph),
+            max_px=max_px,
+            threshold=threshold,
+        )
 
-    empty_umap = hv.Text(0.5, 0.5, "No KL curve for umap").opts(
-        width=pw, height=ph, xaxis=None, yaxis=None, bgcolor="white"
+        empty_umap = hv.Text(0.5, 0.5, "No KL curve for umap").opts(
+            width=pw, height=ph, xaxis=None, yaxis=None, bgcolor="white"
+        )
+
+        nptsne_kl_points = [(i, nptsne_klvalues[i]) for i in range(num_iterations)]
+        nptsne_kl_curve = hv.Curve(nptsne_kl_points).opts(width=pw, height=ph)
+
+        vulkan_kl_points = [(i, vulkan_klvalues[i]) for i in range(num_iterations)]
+        vulkan_kl_curve = hv.Curve(vulkan_kl_points).opts(width=pw, height=ph)
+
+        composition = (
+            (sct1 + sct2 + sct3 + empty_umap + nptsne_kl_curve + vulkan_kl_curve)
+            .opts(shared_axes=False)
+            .cols(3)
+        )
+        return composition
+
+    layout = pn.Row(
+        create_composition,
+        pn.Column(point_size_slider, max_px_slider, threshold_slider),
     )
-
-    nptsne_kl_points = [(i, nptsne_klvalues[i]) for i in range(num_iterations)]
-    nptsne_kl_curve = hv.Curve(nptsne_kl_points).opts(width=pw, height=ph)
-
-    vulkan_kl_points = [(i, vulkan_klvalues[i]) for i in range(num_iterations)]
-    vulkan_kl_curve = hv.Curve(vulkan_kl_points).opts(width=pw, height=ph)
-
-    composition = (
-        (sct1 + sct2 + sct3 + empty_umap + nptsne_kl_curve + vulkan_kl_curve)
-        .opts(shared_axes=False)
-        .cols(3)
-    )
-    pn.panel(composition).show()
+    pn.panel(layout).show()
 
 
 input("Press enter to finish...")

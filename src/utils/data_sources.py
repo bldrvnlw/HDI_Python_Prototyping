@@ -5,9 +5,16 @@ from sklearn.datasets import make_classification
 from sklearn import datasets
 import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
+from scipy import io
 import gzip
 import pickle
 import csv
+from PIL import Image
+import glob
+import os
+from pathlib import Path
+
+# https://cs.nyu.edu/home/people/in_memoriam/roweis/data.html
 
 
 def label_to_colors(labels, cmap="tab10", seed=42):
@@ -103,7 +110,7 @@ def get_mouse_Zheng(num_points: int) -> dict:
     return {"X": X, "label": y, "col_key": col_key}
 
 
-def get_hypomap(num_points: int) -> pd.DataFrame:
+def get_hypomap(num_points: int) -> dict:
     with open(r"C:\\Users\\bvanlew\\Downloads\\hypomap.pkl", "rb") as f:
         data = pickle.load(f)
 
@@ -120,7 +127,7 @@ def get_hypomap(num_points: int) -> pd.DataFrame:
     return {"X": X, "label": y, "col_key": col_key}
 
 
-def get_xmas_tree() -> pd.DataFrame:
+def get_xmas_tree() -> dict:
     data = np.loadtxt(
         r"C:\\Users\\bvanlew\\Downloads\\xmas\\data.csv",
         delimiter=",",
@@ -129,20 +136,143 @@ def get_xmas_tree() -> pd.DataFrame:
     )
     X = data[..., 1:]
     df = pd.read_csv(r"C:\\Users\\bvanlew\\Downloads\\xmas\\metadata.csv")
-    colors = df["main_color"].to_list()
-    unique_colors = np.unique(colors)
-    y = df["main_label"].to_list()
-    return pd.DataFrame(
-        {"points": X, "labels": y, "colors": colors, "unique_colors": unique_colors}
-    )
+    labels = df["sub_label"].unique()
+    color_key = {}
+    for label in labels:
+        color = df.loc[df["sub_label"] == label]["sub_color"].iloc[0]
+        color_key[label] = color
+
+    all_labels = df["sub_label"].tolist()
+    return {"X": X, "label": all_labels, "col_key": color_key}
 
 
 def get_wikiword_350000(
     num_points: int,
-) -> pd.DataFrame:
+) -> dict:
     data = np.load(r"D:\\Data\\ML\\wiki-news-300d-1M.vec\\vec350000.npy")
     X = data[:num_points, ...]
     y = ["w"] * num_points
     col_key = {"w": "#210056"}
     # unique_colors = np.unique(colors)
     return {"X": X, "label": y, "col_key": col_key}
+
+
+def load_word2vec_bin(fname):
+    with open(fname, "rb") as f:
+        # 1. Read header
+        header = f.readline()
+        vocab_size, vector_size = map(int, header.split())
+
+        # 2. Preallocate
+        vocab = []
+        vectors = np.zeros((vocab_size, vector_size), dtype=np.float32)
+
+        # 3. Read each word + vector
+        for i in range(vocab_size):
+            # Read the word (ends at space)
+            word_bytes = bytearray()
+            while True:
+                ch = f.read(1)
+                if ch == b" ":
+                    break
+                word_bytes.extend(ch)
+            word = word_bytes.decode("utf-8")
+
+            # Read the vector
+            vec = np.frombuffer(f.read(4 * vector_size), dtype=np.float32)
+            vectors[i] = vec
+
+            vocab.append(word)
+
+    return vocab, vectors
+
+
+def get_word2vec(num_points: int):
+    # from https://code.google.com/archive/p/word2vec/
+    vocab, vectors = load_word2vec_bin(
+        "C:\\Users\\bvanlew\\Downloads\\word2vec3x10_6_300.bin\\GoogleNews-vectors-negative300.bin"
+    )
+    X = vectors[:num_points, ...]
+    y = ["w"] * num_points
+    col_key = {"w": "#210056"}
+    # unique_colors = np.unique(colors)
+    return {"X": X, "label": y, "col_key": col_key}
+
+
+def load_coil20_images(path, target_size=(128, 128), limit=1400):
+    """
+    Loads COIL-20 PNG images into a NumPy array.
+    see https://www.cs.columbia.edu/CAVE/software/softlib/coil-20.php
+
+    Parameters:
+        path (str): Directory containing the PNG images.
+        target_size (tuple): (height, width), default (128, 128).
+        limit (int): Maximum number of images to load.
+
+    Returns:
+        images (np.ndarray): shape (limit, 16384) float32 normalized [0,1]
+        filenames (list): corresponding filenames
+    """
+    p = Path(path)
+    files = sorted(list(p.glob("**/*.png")))
+
+    # Optionally limit to first 1400 files
+    files = files[:limit]
+
+    num_images = len(files)
+    h, w = target_size
+    data = np.zeros((num_images, h * w), dtype=np.float32)
+
+    for i, file in enumerate(files):
+        img = Image.open(file).convert("L")  # 'L' = grayscale
+        img = img.resize((w, h))  # just in case
+        arr = np.array(img, dtype=np.float32) / 255.0  # normalize to [0, 1]
+        data[i] = arr.flatten()
+
+    return data, files
+
+
+def get_coil20(num_points: int) -> dict:
+    # Example usage
+    coil_path = "D:\\Data\\ML\\coil-20-proc\\coil-20-proc\\"
+    data, filenames = load_coil20_images(coil_path, limit=1400)
+
+    X = data[:num_points, ...]
+    names = [Path(f).name for f in filenames[:num_points]]
+    y = [name.split("_")[0] for name in names]
+    colors, unique_colors, col_key = label_to_colors(y, "random")
+    return {"X": X, "label": y, "col_key": col_key}
+
+
+def get_frey_faces(num_points: int) -> dict:
+    data = io.loadmat(r"D:\\Data\\ML\\frey_rawface.mat")
+    X = data["ff"].transpose()[:num_points]
+    y = ["w"] * num_points
+    col_key = {"w": "#210056"}
+    # unique_colors = np.unique(colors)
+    return {"X": X, "label": y, "col_key": col_key}
+
+
+def load_mnist(path, kind="train"):
+    import os
+    import gzip
+    import numpy as np
+
+    """Load MNIST data from `path`"""
+    labels_path = os.path.join(path, "%s-labels-idx1-ubyte.gz" % kind)
+    images_path = os.path.join(path, "%s-images-idx3-ubyte.gz" % kind)
+
+    with gzip.open(labels_path, "rb") as lbpath:
+        labels = np.frombuffer(lbpath.read(), dtype=np.uint8, offset=8)
+
+    with gzip.open(images_path, "rb") as imgpath:
+        images = np.frombuffer(imgpath.read(), dtype=np.uint8, offset=16).reshape(
+            len(labels), 784
+        )
+
+    return images, labels
+
+
+def get_fashion(num_points: int) -> dict:
+    images, labels = load_mnist(r"D:\\Data\\ML\\fashion", kind="train")
+    pass
