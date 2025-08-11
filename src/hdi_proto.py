@@ -117,10 +117,14 @@ num_iterations = 1000  # was 1000
 # data = get_coil20(num_points=num_points)
 
 # frey_faces
+# perplexity = 30  # was 30
+# num_points = 1965  # was 1965
+# data = get_frey_faces(num_points=num_points)
+
+# fashion MNIST like but more challenging
 perplexity = 30  # was 30
-num_points = 1965  # was 1965
-data = get_frey_faces(num_points=num_points)
-get_fashion(num_points)
+num_points = 60000  # was 60000
+data = get_fashion(num_points)
 
 X = data["X"]
 # Things to do
@@ -470,12 +474,12 @@ if graphics_hv:
     dynspread.threshold = 0.5
 
     # Sliders for dynspread parameters
-    point_size_slider = pn.widgets.IntSlider(
-        name="Point Size", start=1, end=20, value=5
-    )
-    max_px_slider = pn.widgets.IntSlider(
-        name="Max Spread (px)", start=1, end=20, value=5
-    )
+    # point_size_slider = pn.widgets.IntSlider(
+    #     name="Point Size", start=1, end=20, value=5
+    # )
+    # max_px_slider = pn.widgets.IntSlider(
+    #     name="Max Spread (px)", start=1, end=20, value=5
+    # )
     threshold_slider = pn.widgets.FloatSlider(
         name="Threshold", start=0.0, end=1.0, step=0.05, value=0.5
     )
@@ -506,8 +510,8 @@ if graphics_hv:
     pw = 600
     ph = 600
 
-    @pn.depends(point_size_slider, max_px_slider, threshold_slider)
-    def create_composition(point_size, max_px, threshold):
+    @pn.depends(threshold_slider)
+    def create_composition(threshold):
         overlay1 = hv.NdOverlay(
             {
                 label: hv.Points(
@@ -523,9 +527,7 @@ if graphics_hv:
                 overlay1,
                 aggregator=ds.count() if no_categories else "count_cat",
                 color_key=data["col_key"],
-                point_size=point_size,
             ).opts(width=pw, height=ph),
-            max_px=max_px,
             threshold=threshold,
         )
         # print(f"overlay keys: {overlay1.keys()}")
@@ -546,9 +548,7 @@ if graphics_hv:
                 overlay2,
                 aggregator=ds.count() if no_categories else "count_cat",
                 color_key=data["col_key"],
-                point_size=point_size,
             ).opts(width=pw, height=ph),
-            max_px=max_px,
             threshold=threshold,
         )
 
@@ -567,9 +567,7 @@ if graphics_hv:
                 overlay3,
                 aggregator=ds.count() if no_categories else "count_cat",
                 color_key=data["col_key"],
-                point_size=point_size,
             ).opts(width=pw, height=ph),
-            max_px=max_px,
             threshold=threshold,
         )
 
@@ -592,7 +590,7 @@ if graphics_hv:
 
     layout = pn.Row(
         create_composition,
-        pn.Column(point_size_slider, max_px_slider, threshold_slider),
+        pn.Column(threshold_slider),
     )
     pn.panel(layout).show()
 

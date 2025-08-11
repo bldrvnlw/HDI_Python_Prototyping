@@ -275,4 +275,9 @@ def load_mnist(path, kind="train"):
 
 def get_fashion(num_points: int) -> dict:
     images, labels = load_mnist(r"D:\\Data\\ML\\fashion", kind="train")
-    pass
+    colors, unique_colors, color_key = label_to_colors(labels[:num_points])
+    return {
+        "X": images[:num_points],
+        "label": labels[:num_points],
+        "col_key": color_key,
+    }
