@@ -56,7 +56,6 @@ class BoundsShader:
         mgr: kp.Manager,
         num_points: int,
         padding: float,
-        points: np.array,
         persistent_tensors: PersistentTensors,
     ):
         """_summary_
@@ -67,7 +66,7 @@ class BoundsShader:
             points (_type_): _description_
         """
         #
-        persistent_tensors.set_tensor_data(ShaderBuffers.POSITION, points)
+
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_out = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
         # debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
@@ -440,7 +439,6 @@ class CenterScaleShader:
 
         # print(f"Center/scale scale: {scale} diameter: {diameter}")
         push_constants = [
-            float(num_points),
             float(scale),
             float(diameter),
         ]
