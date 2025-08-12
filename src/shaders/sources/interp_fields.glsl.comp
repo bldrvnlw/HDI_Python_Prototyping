@@ -16,6 +16,7 @@
   } pc;
 
 // sample field based on the range [0,0] -> [1.0,1.0]
+// equivalent to texture call 
 vec4 bilinearSample(vec2 uv) {
     vec2 pixelCoord = (uv * pc.imageSize) - vec2(0.5); 
 
