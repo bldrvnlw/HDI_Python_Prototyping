@@ -84,7 +84,7 @@ num_iterations = 1000  # was 1000
 # data = get_xmas_tree()
 # num_points = data["X"].shape[0]  # all in xmas_tree
 # perplexity = 13
-# num_iterations = 500
+# num_iterations = 400
 
 ### Hypomap
 # perplexity = 50  # was 30
@@ -243,9 +243,11 @@ for i in range(num_iterations):
     if i > decay_start and i < decay_start + decay_length:
         decay_fraction = float(i - decay_start) / float(decay_length)
         decay_range = start_exaggeration - end_exaggeration
-        exaggeration = start_exaggeration - (decay_fraction * decay_range)
+        exaggeration = start_exaggeration - (decay_fraction * float(decay_range))
     elif i >= decay_start + decay_length:
-        exaggeration = 1.0
+        exaggeration = end_exaggeration
+    if i < 0.5:  # first iteration load points to buffer
+        persistent_tensors.set_tensor_data(ShaderBuffers.POSITION, points)
 
     # print("**********************************************************")
     # print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
@@ -253,7 +255,6 @@ for i in range(num_iterations):
         mgr=mgr,
         num_points=num_points,
         padding=0.1,
-        points=points,
         persistent_tensors=persistent_tensors,
     )
     # print(f"Bounds {bounds}")
@@ -338,11 +339,10 @@ for i in range(num_iterations):
     bounds = bounds_shader.compute(
         mgr=mgr,
         num_points=num_points,
-        padding=0.1,
-        points=updated_points,  # skip this because it is in the tensor
+        padding=0.0,
         persistent_tensors=persistent_tensors,
     )
-    updated_bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
+    # updated_bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
     # print(f"Updated bounds after point move {updated_bounds}")
     # if exaggeration <= 1.2:
     #    print("Breaking for low exaggeration")
@@ -354,9 +354,9 @@ for i in range(num_iterations):
         persistent_tensors=persistent_tensors,
     )
     # get the updated points
-    points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION).reshape(
-        num_points, 2
-    )
+    # points = persistent_tensors.get_tensor_data(ShaderBuffers.POSITION).reshape(
+    #    num_points, 2
+    # )
     # print(f"Centered points {updated_points}")
 
     # xy = points.reshape(num_points, 2)
@@ -527,6 +527,8 @@ if graphics_hv:
                 overlay1,
                 aggregator=ds.count() if no_categories else "count_cat",
                 color_key=data["col_key"],
+                width=pw,
+                height=ph,
             ).opts(width=pw, height=ph),
             threshold=threshold,
         )
@@ -548,6 +550,8 @@ if graphics_hv:
                 overlay2,
                 aggregator=ds.count() if no_categories else "count_cat",
                 color_key=data["col_key"],
+                width=pw,
+                height=ph,
             ).opts(width=pw, height=ph),
             threshold=threshold,
         )
@@ -567,6 +571,8 @@ if graphics_hv:
                 overlay3,
                 aggregator=ds.count() if no_categories else "count_cat",
                 color_key=data["col_key"],
+                width=pw,
+                height=ph,
             ).opts(width=pw, height=ph),
             threshold=threshold,
         )
