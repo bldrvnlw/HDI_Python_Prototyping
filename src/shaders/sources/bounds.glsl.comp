@@ -25,9 +25,6 @@
     for (uint i = lid; i < NP[0]; i += groupSize)
     {
       vec2 pos = Positions[i];
-      Bounds[0] = pos;
-      Bounds[1] = pos;
-      //Bug[i] = vec2(NP[0]);
 
       minBound = min(pos, minBound);
       maxBound = max(pos, maxBound);
