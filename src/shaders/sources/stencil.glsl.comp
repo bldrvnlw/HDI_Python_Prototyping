@@ -30,7 +30,7 @@ void main() {
     vec2 norm = (point - pc.rect_min) / range;
 
     // Convert to nearest pixel coordinates
-    ivec2 pxCoord = ivec2(floor((norm * pc.imageSize) + 0.5));
+    ivec2 pxCoord = ivec2(round(norm * pc.imageSize));
     
     // Draw a 3x3 region around the point
     Bug[id] = pxCoord;
