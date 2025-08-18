@@ -1,5 +1,8 @@
   #version 450
-
+// Sample the static field texture for all the points.
+// and sum the value to product the normalization factor Z-hat
+// see https://arxiv.org/pdf/1805.10817 Eq 13
+// This is subsequently used to calculate the repulsive forces Eq 14.
   layout(std430, binding = 0) readonly buffer PosBuf{ vec2 Positions[]; };
   layout(std430, binding = 1) writeonly buffer ValBuf { vec4 Values[]; };
   layout(std430, binding = 2) writeonly buffer SumBuf { float Sum[]; };
@@ -16,7 +19,7 @@
   } pc;
 
 // sample field based on the range [0,0] -> [1.0,1.0]
-// equivalent to texture call 
+// equivalent to texture(fields, point) call 
 vec4 bilinearSample(vec2 uv) {
     vec2 pixelCoord = (uv * pc.imageSize) - vec2(0.5); 
 
@@ -52,8 +55,13 @@ vec4 bilinearSample(vec2 uv) {
       // Normalized position of point in range [0,0] to [1.0, 1.0]
       vec2 normPos = (Positions[i] - min_bounds) / range;
 
-      // Bilinearly sample the input texture
+      // Bilinearly sample the input texture 
+      // using GPU native texture operation
+      // see https://arxiv.org/pdf/1805.10817 5.1.2
       vec4 v = bilinearSample(normPos);
+      // SumQ (Z-hat) is the sum of the (static field -1)
+      // that is used as the normalization factor for 
+      // the repulsive forces.
       sum_Q += max(v.x - 1, 0.0);
       Values[i] = v;
     }
