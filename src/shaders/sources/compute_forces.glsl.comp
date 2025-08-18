@@ -44,8 +44,8 @@
     vec2 sum_positive = vec2(0);
     float kl_divergence = 0;
     
-    uint index = Indices[2*i]; // offset to start of nn list - in Neighbours
-    uint size = Indices[2*i + 1]; // length of nn list
+    uint index = Indices[i * 2 + 0]; // offset to start of nn list - in Neighbours
+    uint size = Indices[i * 2 + 1]; // length of nn list
 
     vec2 positive_force = vec2(0);
    
