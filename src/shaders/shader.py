@@ -7,6 +7,8 @@ import sys
 from typing import Annotated
 from shaders.persistent_tensors import PersistentTensors, ShaderBuffers
 import time
+from PIL import Image
+import ctypes
 
 
 class Shader:
@@ -106,16 +108,20 @@ class StencilShader:
         height: int,
         num_points: int,
         persistent_tensors: PersistentTensors,
+        iter: int,
     ):
         bounds = persistent_tensors.get_tensor_data(ShaderBuffers.BOUNDS)
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         debug = persistent_tensors.get_tensor(ShaderBuffers.POS_DEBUG)
 
+        npwidth = width
+        if npwidth % 8:
+            npwidth = width + 8 - width % 8  # add padding to make it multiple of 8
         # print(f"bounds {bounds}")
         # np.set_printoptions(threshold=sys.maxsize)
         # print(f"Points  {points}")
-        stencil_np_array = np.zeros((height, width, 4), dtype=np.uint8)
-        stencil_out = mgr.image(stencil_np_array, width, height, 4)
+        stencil_np_array = np.zeros((height, npwidth, 4), dtype=np.uint8)
+        stencil_out = mgr.image(stencil_np_array, npwidth, height, 4)
         # print(f"Tensor points in shape: {points_in.size()}")
         # print(f"stencil size width: {width} height: {height}")
         push_constants = [
@@ -149,10 +155,18 @@ class StencilShader:
         seq.eval_await()
 
         generated_stencil = (
-            np.array(stencil_out.data()).reshape(height, width, 4).astype(np.uint8)
+            np.array(stencil_out.data()).reshape(height, npwidth, 4).astype(np.uint8)
         )
-        debug = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
+        # debug = persistent_tensors.get_tensor_data(ShaderBuffers.POS_DEBUG)
 
+        # if iter % 50 == 0:
+        #     image = Image.fromarray(
+        #         np.array(stencil_out.data())
+        #         .reshape(height, npwidth, 4)
+        #         .astype(np.uint8)
+        #         * 255
+        #     )
+        #     image.show(title=f"Iter{iter}")
         # print(
         #    f"Generated stencil shape: {generated_stencil.shape}  dtype:"
         #    f" {generated_stencil.dtype}"
@@ -185,14 +199,18 @@ class FieldComputationShader:
         width: int,
         height: int,
         persistent_tensors: PersistentTensors,
+        iter: int,
     ):
+        npwidth = width
+        if npwidth % 8:
+            npwidth = width + 8 - width % 8  # add padding to make it multiple of 8
         field_out = mgr.image(
-            np.zeros((height, width, 4), dtype=np.float32), width, height, 4
+            np.zeros((height, npwidth, 4), dtype=np.float32), npwidth, height, 4
         )
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
         num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
-        stencil_in = mgr.image(stencil, width, height, 4)
+        stencil_in = mgr.image(stencil, npwidth, height, 4)
         params = [points_in, bounds_in, field_out, stencil_in, num_points_tensor]
         # print(f"Num points: {num_points}")
         push_constants = [float(width), float(height), self.func_support]
@@ -200,7 +218,7 @@ class FieldComputationShader:
             tensors=params,  # The stencil_tensor is the only output parameter
             spirv=self.shader_code.spv,
             workgroup=[width, height, 1],  # Global dispatch 1 thread per pixel
-            push_consts=push_constants,
+            push_consts=push_constants,  # actual size as opposed to padded size
         )
         (
             mgr.sequence()
@@ -215,8 +233,12 @@ class FieldComputationShader:
 
         # print(f"Field shape {field_out.data().shape} ")
         generated_field = (
-            np.array(field_out.data()).reshape(height, width, 4).astype(np.float32)
+            np.array(field_out.data()).reshape(height, npwidth, 4).astype(np.float32)
         )
+
+        # if iter % 50 == 0:
+        #     image = Image.fromarray(generated_field[:, :, 0], mode="F")
+        #     image.show(title=f"Iter{iter}")
         # np.savetxt("field_output.txt", generated_field[..., 1], fmt="%f")
         # print(f"Field data {field_out.data()}")
         return generated_field
@@ -237,13 +259,17 @@ class InterpolationShader:
         persistent_tensors: PersistentTensors,
     ):
 
+        npwidth = width
+        if npwidth % 8:
+            npwidth = width + 8 - width % 8  # add padding to make it multiple of 8
+
         interp_fields_out = persistent_tensors.get_tensor(ShaderBuffers.INTERP_FIELDS)
         sum_out = persistent_tensors.get_tensor(ShaderBuffers.SUM_Q)
 
         points_in = persistent_tensors.get_tensor(ShaderBuffers.POSITION)
         bounds_in = persistent_tensors.get_tensor(ShaderBuffers.BOUNDS)
         num_points_tensor = persistent_tensors.get_tensor(ShaderBuffers.NUM_POINTS)
-        fieldimage_in = mgr.image(fields, width, height, 4)
+        fieldimage_in = mgr.image(fields, npwidth, height, 4)
 
         params = [
             points_in,
