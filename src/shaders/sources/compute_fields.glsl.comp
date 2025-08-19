@@ -79,4 +79,9 @@
     if (lid < 1) {
       imageStore(Fields, ivec2(x, y), vec4(reduction_array[0] + reduction_array[1], 0));
     } 
+    // field fiducials
+    // imageStore(Fields, ivec2(0,0), vec4(255.0));
+    // imageStore(Fields, ivec2(0, pc.imageSize.y - 1),  vec4(255.0)); 
+    // imageStore(Fields, ivec2(pc.imageSize.x - 1, 0),  vec4(255.0));
+    // imageStore(Fields, ivec2(pc.imageSize) - ivec2(1,1),  vec4(255.0));
   }

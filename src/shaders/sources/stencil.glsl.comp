@@ -28,7 +28,6 @@ void main() {
 
     // Convert point to normalized device coordinates in [0,1]
     vec2 norm = (point - pc.rect_min) / range;
-
     // Convert to nearest pixel coordinates
     ivec2 pxCoord = ivec2(round(norm * pc.imageSize));
     
@@ -44,8 +43,15 @@ void main() {
             }
         }
     }
-    //imageStore(outImage, ivec2(0,0), ivec4(1));
-    //imageStore(outImage, ivec2(pc.imageSize.x - 1,pc.imageSize.y -1), ivec4(1));
-    //imageStore(outImage, ivec2(0,pc.imageSize.y -1), ivec4(1));
-    //imageStore(outImage, ivec2(pc.imageSize.x - 1,0), ivec4(1));
+    // // stencil fiducials
+    // imageStore(outImage, ivec2(0,0), ivec4(1));
+    // imageStore(outImage, ivec2(pc.imageSize.x - 1,pc.imageSize.y -1), ivec4(1));
+    // imageStore(outImage, ivec2(0,pc.imageSize.y -1), ivec4(1));
+    // imageStore(outImage, ivec2(pc.imageSize.x - 1,0), ivec4(1));
+    // // aligned image fiducials
+    // ivec2 outSize = imageSize(outImage);
+    // imageStore(outImage, ivec2(0,0), ivec4(1));
+    // imageStore(outImage, ivec2(outSize.x - 1,outSize.y -1), ivec4(1));
+    // imageStore(outImage, ivec2(0,outSize.y -1), ivec4(1));
+    // imageStore(outImage, ivec2(outSize.x - 1,0), ivec4(1));
 }
