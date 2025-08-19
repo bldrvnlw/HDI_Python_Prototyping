@@ -80,51 +80,79 @@ centerscale_shader = CenterScaleShader()
 # 1M digits in the range 0-128
 
 num_iterations = 1000  # was 1000
+# for all iterations
 
-# data = get_xmas_tree()
-# num_points = data["X"].shape[0]  # all in xmas_tree
-# perplexity = 13
-# num_iterations = 400
+start_exaggeration = 4.0  # was 4.0  # should decay at a certain point
+end_exaggeration = 1.0
+decay_start = 250  # was 250
+decay_length = 150  # was 201500
+
+# select a set from
+# select_set = "xmas_tree"
+# select_set = "hypomap"
+# select_set = "mouse_Zheng"
+# select_set = "MNIST"
+# select_set = "wikiword"
+# select_set = "word2vec"
+# select_set = "coil20"
+# select_set = "frey_faces"
+select_set = "fashion"
+
+if select_set == "xmas_tree":
+    data = get_xmas_tree()
+    num_points = data["X"].shape[0]  # all in xmas_tree
+    perplexity = 13
+    num_iterations = 500
 
 ### Hypomap
-# perplexity = 50  # was 30
-# num_points = 433369  # was 433369
-# data = get_hypomap(num_points=num_points)
+if select_set == "hypomap":
+    perplexity = 50  # was 30
+    num_points = 433369  # was 433369
+    data = get_hypomap(num_points=num_points)
 
 ### Zheng
-# perplexity = 30  # was 30
-# num_points = 1306127  # all in Zheng 1306127
-# data = get_mouse_Zheng(num_points=num_points)
+if select_set == "mouse_Zheng":
+    perplexity = 50  # was 50
+    num_points = 1306127  # all in Zheng 1306127
+    data = get_mouse_Zheng(num_points=num_points)
 
 ### MNIST
-# perplexity = 30  # was 30
-# num_points = 60000  # was 70000 all in MNIST
-# data = get_MNIST(num_points=num_points)
+if select_set == "MNIST":
+    perplexity = 30  # was 30
+    num_points = 60000  # was 70000 all in MNIST
+    data = get_MNIST(num_points=num_points)
 
 ### Wikiword
-# perplexity = 50  # was 50
-# num_points = 350000  # was 350000
-# data = get_wikiword_350000(num_points=num_points)
+if select_set == "wikiword":
+    perplexity = 50  # was 50
+    num_points = 350000  # was 350000
+    data = get_wikiword_350000(num_points=num_points)
 
 ### Word2vec
-# perplexity = 80  # was
-# num_points = 1000000  # was 3000000
-# data = get_word2vec(num_points=num_points)
+if select_set == "word2vec":
+    perplexity = 100  # was 30
+    num_points = 300000  # was 3000000
+    data = get_word2vec(num_points=num_points)
 
 # coil-20
-# perplexity = 30  # was 30
-# num_points = 1400  # was 1400
-# data = get_coil20(num_points=num_points)
+if select_set == "coil20":
+    perplexity = 30  # was 30
+    num_points = 1400  # was 1400
+    data = get_coil20(num_points=num_points)
 
 # frey_faces
-# perplexity = 30  # was 30
-# num_points = 1965  # was 1965
-# data = get_frey_faces(num_points=num_points)
+if select_set == "frey_faces":
+    perplexity = 30  # was 30
+    num_points = 1965  # was 1965
+    data = get_frey_faces(num_points=num_points)
 
 # fashion MNIST like but more challenging
-perplexity = 30  # was 30
-num_points = 60000  # was 60000
-data = get_fashion(num_points)
+if select_set == "fashion":
+    # start_exaggeration = 1.0  # was 4.0  # should decay at a certain point
+    # end_exaggeration = 1.0
+    perplexity = 30  # was 30
+    num_points = 60000  # was 60000
+    data = get_fashion(num_points=num_points)
 
 X = data["X"]
 # Things to do
@@ -219,13 +247,6 @@ persistent_tensors = PersistentTensors(
 )
 
 
-# for all iterations
-
-start_exaggeration = 4.0  # was 4.0  # should decay at a certain point
-end_exaggeration = 1.0
-decay_start = 250  # was 250
-decay_length = 150  # was 201500
-
 vulkan_klvalues = np.zeros((num_iterations,))
 
 # plt.figure(0)
@@ -233,6 +254,10 @@ vulkan_klvalues = np.zeros((num_iterations,))
 a_num_points = np.array([num_points], dtype=np.uint32)
 persistent_tensors.set_tensor_data(ShaderBuffers.NUM_POINTS, a_num_points)
 
+sumQ = []
+field_w = []
+field_h = []
+pad_value = []
 
 print("Starting GPU iterations")
 import time
@@ -250,7 +275,7 @@ for i in range(num_iterations):
         persistent_tensors.set_tensor_data(ShaderBuffers.POSITION, points)
 
     # print("**********************************************************")
-    # print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
+    print(f"iteration number: {i} Exaggeration factor: {exaggeration}")
     bounds = bounds_shader.compute(
         mgr=mgr,
         num_points=num_points,
@@ -259,14 +284,14 @@ for i in range(num_iterations):
     )
     # print(f"Bounds {bounds}")
 
-    MINIMUM_FIELDS_SIZE = 5
-    RESOLUTION_SCALING = 2
+    MINIMUM_FIELDS_SIZE = 5.0
+    RESOLUTION_SCALING = 2.0
     range_x = abs(bounds[1][0] - bounds[0][0])
     range_y = abs(bounds[1][1] - bounds[0][1])
 
     # assume adaptive resolution (scales with points range) with a minimum size
-    width = int(max(RESOLUTION_SCALING * range_x, MINIMUM_FIELDS_SIZE))
-    height = int(max(RESOLUTION_SCALING * range_y, MINIMUM_FIELDS_SIZE))
+    width = math.floor(max(RESOLUTION_SCALING * range_x, MINIMUM_FIELDS_SIZE))
+    height = math.floor(max(RESOLUTION_SCALING * range_y, MINIMUM_FIELDS_SIZE))
 
     # This width and height is used for the size of the point "plot"
 
@@ -277,6 +302,7 @@ for i in range(num_iterations):
         height=height,
         num_points=num_points,
         persistent_tensors=persistent_tensors,
+        iter=i,
     )
     # print(f"Stencil shape {stencil.shape} dtype {stencil.dtype}")
     # print(stencil)
@@ -289,7 +315,11 @@ for i in range(num_iterations):
         width=width,
         height=height,
         persistent_tensors=persistent_tensors,
+        iter=i,
     )
+    field_w.append(width)
+    field_h.append(height)
+    pad_value.append(width % 8)
 
     # print(f"Fields shape {fields.shape} dtype {fields.dtype}")
 
@@ -305,6 +335,7 @@ for i in range(num_iterations):
     if interpolation_shader.sumQ[0] == 0:
         print("!!!! Breaking out due to interpolation sum 0 !!!!")
         break
+    sumQ.append(interpolation_shader.sumQ[0])
 
     # q_norm = calculate_normalization_Q(points)
     # q_norm = compute_Qnorm_cuda(points)
@@ -457,7 +488,7 @@ if graphics_hv:
     size = 5 / math.log10(num_points)
     import plotly.io as pio
     import holoviews as hv
-    from holoviews import opts
+    from holoviews import opts, streams
     from holoviews.operation.datashader import datashade, dynspread
     import datashader as ds
     import datashader.transfer_functions as tf
@@ -466,6 +497,7 @@ if graphics_hv:
     from mpl_toolkits.axes_grid1 import ImageGrid, Grid
     from functools import partial
     import panel as pn
+    from bokeh.models import CrosshairTool
 
     hv.extension("bokeh")
     pn.extension()
@@ -509,6 +541,11 @@ if graphics_hv:
     # print(df3[["xe", "ye"]].isna().sum())
     pw = 600
     ph = 600
+
+    linked_crosshair = CrosshairTool(dimensions="height")
+
+    def hook(plot, element):
+        plot.state.add_tools(linked_crosshair)
 
     @pn.depends(threshold_slider)
     def create_composition(threshold):
@@ -581,14 +618,44 @@ if graphics_hv:
             width=pw, height=ph, xaxis=None, yaxis=None, bgcolor="white"
         )
 
+        empty_sumQ = hv.Text(0.5, 0.5, "No sumQ curve for umap or nptsne").opts(
+            width=pw, height=ph, xaxis=None, yaxis=None, bgcolor="white"
+        )
+
         nptsne_kl_points = [(i, nptsne_klvalues[i]) for i in range(num_iterations)]
-        nptsne_kl_curve = hv.Curve(nptsne_kl_points).opts(width=pw, height=ph)
+        nptsne_kl_curve = (
+            hv.Curve(nptsne_kl_points, label="KL nptsne")
+            .opts(width=pw, height=ph)
+            .opts(hooks=[hook])
+        )
 
         vulkan_kl_points = [(i, vulkan_klvalues[i]) for i in range(num_iterations)]
-        vulkan_kl_curve = hv.Curve(vulkan_kl_points).opts(width=pw, height=ph)
+        vulkan_kl_curve = hv.Curve(vulkan_kl_points, label="KL vulkan").opts(
+            width=pw, height=ph, hooks=[hook]
+        )
+
+        diffw = np.array(field_w) - np.array(field_h)
+
+        width_curve = hv.Curve(field_w, label="Fields width").opts(width=pw, height=ph)
+        diff_curve = (
+            hv.Curve(pad_value, label="Padding value")
+            .opts(width=pw, height=ph)
+            .opts(hooks=[hook])
+        )
+        sumQ_curve = hv.Curve(sumQ, label="sumQ").opts(width=pw, height=ph)
 
         composition = (
-            (sct1 + sct2 + sct3 + empty_umap + nptsne_kl_curve + vulkan_kl_curve)
+            (
+                sct1
+                + sct2
+                + sct3
+                + empty_umap
+                + nptsne_kl_curve
+                + vulkan_kl_curve
+                + width_curve
+                + sumQ_curve
+                + diff_curve
+            )
             .opts(shared_axes=False)
             .cols(3)
         )
